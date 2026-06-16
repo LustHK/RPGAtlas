@@ -240,6 +240,7 @@ const _createMessageSystem = window.createMessageSystem;
     switches: {},
     vars: {},
     selfSw: {},
+    quests: {},
     party: [],
     inv: { item: {}, weapon: {}, armor: {} },
     gold: 0,
@@ -344,16 +345,28 @@ const _createMessageSystem = window.createMessageSystem;
     bag[id] = clamp((bag[id] || 0) + n, 0, 99);
     if (!bag[id]) delete bag[id];
   }
-  function invCount(kind, id) {
-    return G.inv[kind][id] || 0;
-  }
-  function dbFor(kind) {
-    return kind === "item"
-      ? proj.items
-      : kind === "weapon"
-        ? proj.weapons
-        : proj.armors;
-  }
+  function invCount(kind, id) { return G.inv[kind][id] || 0; }
+  function dbFor(kind) { return kind === "item" ? proj.items : kind === "weapon" ? proj.weapons : proj.armors; }
+  const questRuntime = window.RPGAtlasQuests.create({
+    G,
+    RA,
+    clamp,
+    gainExp,
+    addInv,
+    invCount,
+    dbFor,
+    refreshAllPages,
+    getProj: () => proj,
+    now: () => Date.now(),
+  });
+  const {
+    Quests,
+    questState,
+    objectiveDone,
+    evaluateQuestFailures,
+    noteBattleFailure,
+    onEnemyKilled,
+  } = questRuntime;
   function traitDescription(t) {
     const value = Number(t.value) || 0;
     if (t.type === "param")
@@ -436,8 +449,12 @@ const _createMessageSystem = window.createMessageSystem;
     const c = page.cond;
     if (c.switchId && !G.switches[c.switchId]) return false;
     if (c.varId && !((G.vars[c.varId] || 0) >= c.varVal)) return false;
-    if (c.selfSw && !G.selfSw[G.mapId + ":" + evId + ":" + c.selfSw])
-      return false;
+    if (c.selfSw && !G.selfSw[G.mapId + ":" + evId + ":" + c.selfSw]) return false;
+    if (c.questId && Quests.status(c.questId) !== (c.questStatus || "active")) return false;
+    if (c.objectiveQuestId) {
+      const done = objectiveDone(c.objectiveQuestId, Number(c.objectiveIndex) || 0);
+      if ((c.objectiveStatus || "completed") === "completed" ? !done : done) return false;
+    }
     return true;
   }
   // HD-2D point lights are authored as events named "light [#rrggbb] [radius]",
@@ -468,26 +485,11 @@ const _createMessageSystem = window.createMessageSystem;
   }
   function makeEvRT(evData) {
     const rt = {
-      ev: evData,
-      x: evData.x,
-      y: evData.y,
-      rx: evData.x,
-      ry: evData.y,
-      dir: 0,
-      frame: 1,
-      animT: 0,
-      moving: false,
-      tx: 0,
-      ty: 0,
-      page: null,
-      pageIndex: -1,
-      erased: false,
-      locked: false,
-      moveT: 30 + rnd(90),
-      route: null,
-      speed: 0.05,
-      charsetIdx: -1,
-      kind: "",
+      ev: evData, x: evData.x, y: evData.y, rx: evData.x, ry: evData.y,
+      prx: evData.x, pry: evData.y, // previous-tick render pos (for interpolation)
+      dir: 0, frame: 1, animT: 0, moving: false, tx: 0, ty: 0,
+      page: null, pageIndex: -1, erased: false, locked: false,
+      moveT: 30 + rnd(90), route: null, speed: 0.05, charsetIdx: -1, kind: "",
       light: parseLight(evData.name),
       particle: parseParticle(evData.name),
       body: null,
@@ -848,13 +850,14 @@ const _createMessageSystem = window.createMessageSystem;
           await this.runList(c.branches[i] || []);
           break;
         }
-        case "switch":
-          G.switches[c.id] = !!c.val;
-          refreshAllPages();
+        case "switch": 
+          G.switches[c.id] = !!c.val; 
+          refreshAllPages(); 
+          evaluateQuestFailures(); 
           break;
-        case "selfsw":
-          G.selfSw[this.selfKey(c.key)] = !!c.val;
-          refreshAllPages();
+        case "selfsw": 
+          G.selfSw[this.selfKey(c.key)] = !!c.val; 
+          refreshAllPages(); 
           break;
         case "var": {
           const cur = G.vars[c.id] || 0;
@@ -863,6 +866,7 @@ const _createMessageSystem = window.createMessageSystem;
           G.vars[c.id] =
             c.op === "add" ? cur + v : c.op === "sub" ? cur - v : v;
           refreshAllPages();
+          evaluateQuestFailures();
           break;
         }
         case "if": {
@@ -870,9 +874,42 @@ const _createMessageSystem = window.createMessageSystem;
           await this.runList(ok2 ? c.then : c.else);
           break;
         }
+        case "questStart":
+          Quests.start(c.questId);
+          break;
+
+        case "questAdvanceObj":
+          Quests.advanceObjective(c.questId, c.objIndex, c.amount);
+          evaluateQuestFailures();
+          break;
+
+        case "questSetObj":
+          Quests.setObjective(c.questId, c.objIndex, c.value);
+          evaluateQuestFailures();
+          break;
+
+        case "questComplete": {
+          const res = Quests.complete(c.questId, {
+            mapId: G.mapId,
+            eventId: this.evRT ? this.evRT.ev.id : 0,
+          });
+          if (res && res.rewardText) {
+            await showMessage(
+              "",
+              "You received " + res.rewardText + "!",
+            );
+          }
+          break;
+        }
+
+        case "questFail":
+          Quests.fail(c.questId);
+          break;
+
         case "transfer":
           await transferPlayer(c.mapId, c.x, c.y, c.dir);
           break;
+
         case "gold":
           G.gold = clamp(
             G.gold + (c.op === "sub" ? -c.val : c.val),
@@ -880,8 +917,13 @@ const _createMessageSystem = window.createMessageSystem;
             9999999,
           );
           break;
+
         case "item":
-          addInv(c.kind || "item", c.id, c.op === "sub" ? -c.val : c.val);
+          addInv(
+            c.kind || "item",
+            c.id,
+            c.op === "sub" ? -c.val : c.val,
+          );
           break;
         case "party": {
           if (c.op === "add") {
@@ -923,7 +965,7 @@ const _createMessageSystem = window.createMessageSystem;
           await Shop.run(c.goods || []);
           break;
         case "wait": {
-          for (let i = 0; i < (c.frames || 30); i++) await frameWait();
+          await waitFrames(c.frames || 30);
           break;
         }
         case "se":
@@ -949,11 +991,9 @@ const _createMessageSystem = window.createMessageSystem;
           if (!frames) {
             cameraZoom = target;
           } else {
-            for (let i = 1; i <= frames; i++) {
-              const t = i / frames;
+            await tickTween(frames, (t) => {
               cameraZoom = start + (target - start) * (t * t * (3 - 2 * t));
-              await frameWait();
-            }
+            });
           }
           cameraZoom = target;
           break;
@@ -1030,6 +1070,8 @@ const _createMessageSystem = window.createMessageSystem;
           return cmp(G.vars[cond.id] || 0, cond.val, cond.cmp || ">=");
         case "selfsw":
           return !!G.selfSw[this.selfKey(cond.key)];
+        case "quest":
+          return Quests.status(cond.questId) === (cond.status || "active");
         case "item":
           return invCount(cond.itemKind || "item", cond.id) > 0;
         case "gold":
@@ -1043,19 +1085,20 @@ const _createMessageSystem = window.createMessageSystem;
           return true;
         }
         default:
-          return true;
-      }
+          return true;      }
     }
   }
   const scriptApi = {
     setSwitch(id, v) {
       G.switches[id] = !!v;
+      evaluateQuestFailures();
     },
     getSwitch(id) {
       return !!G.switches[id];
     },
     setVar(id, v) {
       G.vars[id] = v;
+      evaluateQuestFailures();
     },
     getVar(id) {
       return G.vars[id] || 0;
@@ -1065,6 +1108,30 @@ const _createMessageSystem = window.createMessageSystem;
     },
     party() {
       return G.party;
+    },
+    quest(id) {
+      return Quests.get(id);
+    },
+    questStatus(id) {
+      return Quests.status(id);
+    },
+    startQuest(id) {
+      return Quests.start(id);
+    },
+    advanceQuestObjective(id, index, amount) {
+      return Quests.advanceObjective(id, index, amount);
+    },
+    setQuestObjective(id, index, value) {
+      return Quests.setObjective(id, index, value);
+    },
+    completeQuest(id) {
+      return Quests.complete(id);
+    },
+    failQuest(id) {
+      return Quests.fail(id);
+    },
+    abandonQuest(id) {
+      return Quests.abandon(id);
     },
     state() {
       return G;
@@ -1180,8 +1247,27 @@ const _createMessageSystem = window.createMessageSystem;
   }));
 
   let frameWaiters = [];
-  function frameWait() {
-    return new Promise((r) => frameWaiters.push(r));
+  function frameWait() { return new Promise((r) => frameWaiters.push(r)); }
+  // Tick-accurate timers: counted in update(), so event waits/tweens advance by ticks even
+  // when several ticks run in one rendered frame. (frameWait above is per-rendered-frame.)
+  let tickTimers = [];
+  function waitFrames(n) {
+    return new Promise((resolve) => tickTimers.push({ left: Math.max(1, n | 0), resolve }));
+  }
+  function tickTween(n, step) {
+    const total = Math.max(1, n | 0);
+    return new Promise((resolve) => tickTimers.push({ left: total, total, step, resolve }));
+  }
+  function pumpTickTimers() {
+    if (!tickTimers.length) return;
+    const timers = tickTimers; tickTimers = [];
+    const done = [];
+    for (const tm of timers) {
+      tm.left--;
+      if (tm.step) tm.step((tm.total - tm.left) / tm.total);
+      if (tm.left <= 0) done.push(tm); else tickTimers.push(tm);
+    }
+    done.forEach((tm) => tm.resolve());
   }
 
   async function runEventBlocking(rt) {
@@ -1209,11 +1295,7 @@ const _createMessageSystem = window.createMessageSystem;
     else await fadeTo(1, 250);
     await loadMap(mapId);
     const p = G.player;
-    p.x = p.tx = x;
-    p.y = p.ty = y;
-    p.rx = x;
-    p.ry = y;
-    p.moving = false;
+    p.x = p.tx = x; p.y = p.ty = y; p.rx = x; p.ry = y; p.prx = x; p.pry = y; p.moving = false;
     if (dir != null) p.dir = dir;
     await render();
     if (tr && tr.in) await tr.in();
@@ -1234,6 +1316,7 @@ const _createMessageSystem = window.createMessageSystem;
     const waiters = frameWaiters;
     frameWaiters = [];
     waiters.forEach((r) => r());
+    pumpTickTimers(); // advance tick-accurate event timers (wait / camera-zoom)
     if (scene === "map") Plugins.fire("update");
     if (scene !== "map" || menuOpen) return;
 
@@ -1353,11 +1436,14 @@ const _createMessageSystem = window.createMessageSystem;
     // events
     for (const rt of evRTs) {
       if (rt.erased || !rt.page) continue;
+      // Same no-dead-frame pattern as the player above: a finished step chains into the next
+      // route/random step this same tick instead of pausing a frame at each tile.
       if (rt.moving) {
         updateEntityMotion(rt, rt.speed);
-      } else if (rt.route) {
+      }
+      if (!rt.moving && rt.route) {
         updateRoute(rt);
-      } else if (rt.page.moveType === "random" && !rt.locked && !blockingRun) {
+      } else if (!rt.moving && rt.page.moveType === "random" && !rt.locked && !blockingRun) {
         if (--rt.moveT <= 0) {
           rt.moveT = 40 + rnd(100);
           const d = rnd(4);
@@ -1459,6 +1545,7 @@ const _createMessageSystem = window.createMessageSystem;
       shakeX = Math.sin(globalT * freq) * amp;
       shakeY = Math.cos(globalT * freq * 0.85) * amp;
     }
+    const ip = (pv, cv) => (pv == null ? cv : pv + (cv - pv) * 1);
     const viewW = SCREEN_W / cameraZoom,
       viewH = SCREEN_H / cameraZoom;
     const targetCamX = clamp(
@@ -1487,6 +1574,7 @@ const _createMessageSystem = window.createMessageSystem;
       camX = targetCamX;
       camY = targetCamY;
     }
+    const pix = p.rx, piy = p.ry, alpha = 1;
     const drawables = [];
     for (const rt of evRTs) {
       if (rt.erased || !rt.page || rt.charsetIdx < 0) continue;
@@ -1510,8 +1598,7 @@ const _createMessageSystem = window.createMessageSystem;
         sprites.push({
           id: d === p ? "player" : "ev_" + d.ev.id,
           canvas: Assets.charFrameCanvas(idx, d.dir, walkFrame(d)),
-          rx: d.rx,
-          ry: d.ry,
+          rx: ip(d.prx, d.rx), ry: ip(d.pry, d.ry),
           pr: pri === "below" ? 0 : pri === "above" ? 2 : 1,
         });
       }
@@ -1519,12 +1606,7 @@ const _createMessageSystem = window.createMessageSystem;
       // Luzes de eventos
       for (const rt of evRTs) {
         if (rt.light && !rt.erased && rt.page) {
-          lights.push({
-            rx: rt.rx,
-            ry: rt.ry,
-            color: rt.light.color,
-            radius: rt.light.radius,
-          });
+          lights.push({ rx: ip(rt.prx, rt.rx), ry: ip(rt.pry, rt.ry), color: rt.light.color, radius: rt.light.radius });
         }
       }
       // Luzes do mapa
@@ -1563,7 +1645,7 @@ const _createMessageSystem = window.createMessageSystem;
         map.hd2d && map.hd2d.ambient != null ? Number(map.hd2d.ambient) : 0.45;
       const flashIntensity = flashTimer > 0 ? flashOpacity * (flashTimer / (flashDuration || 15)) : 0;
       await Renderer.renderFrame(SCREEN_W, SCREEN_H, camX, camY, sprites, {
-        focus: { rx: p.rx, ry: p.ry },
+        focus: { rx: pix, ry: piy },
         lights,
         particles,
         zoom: cameraZoom,
@@ -1602,14 +1684,7 @@ const _createMessageSystem = window.createMessageSystem;
       ctx.drawImage(lowerBuf, -camX, -camY);
       for (const d of drawables) {
         const idx = d === p ? p.charsetIdx : d.charsetIdx;
-        Assets.drawChar(
-          ctx,
-          idx,
-          d.dir,
-          walkFrame(d),
-          Math.round(d.rx * TILE - camX),
-          Math.round(d.ry * TILE - 8 - camY),
-        );
+        Assets.drawChar(ctx, idx, d.dir, walkFrame(d), Math.round(ip(d.prx, d.rx) * TILE - camX), Math.round(ip(d.pry, d.ry) * TILE - 8 - camY));
       }
       ctx.drawImage(upperBuf, -camX, -camY);
       ctx.restore();
@@ -1622,20 +1697,26 @@ const _createMessageSystem = window.createMessageSystem;
       ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
       ctx.restore();
     }
-    if (scene === "map")
-      Plugins.fireRender(ctx, {
-        w: SCREEN_W,
-        h: SCREEN_H,
-        t: globalT,
-        map: map,
-        camX: camX,
-        camY: camY,
-        cameraZoom: cameraZoom,
-      });
+    if (scene === "map") Plugins.fireRender(ctx, {
+      w: SCREEN_W, h: SCREEN_H, t: globalT, map: map,
+      camX: camX, camY: camY, cameraZoom: cameraZoom,
+      playerX: pix, playerY: piy, alpha: alpha, // interpolated player pos + blend factor
+    });
   }
 
-  async function loop() {
-    update();
+  // Fixed-timestep loop: update() runs at a steady 60 ticks/sec regardless of refresh rate,
+  // render() once per frame (every frame, at full refresh). Keeps the tick-based engine in
+  // sync without per-system delta time, and stops fast displays from running in fast-forward.
+  // render() is async (PIXI HD-2D path), so we await it to avoid overlapping frames.
+
+  let loopLast = 0, loopAcc = 0;
+  const TICK_MS = 1000 / 60;
+  async function loop(now) {
+    if (loopLast === 0) loopLast = now;   // first frame: establish baseline, no delta
+    loopAcc += now - loopLast;
+    loopLast = now;
+    if (loopAcc > 250) loopAcc = 250;     // clamp after a stall / tab switch (avoid spiral)
+    while (loopAcc >= TICK_MS) { update(); loopAcc -= TICK_MS; }
     await render();
     requestAnimationFrame(loop);
   }
@@ -1701,6 +1782,21 @@ const _createMessageSystem = window.createMessageSystem;
     );
     return i < 0 ? null : G.party[i];
   }
+  const journalView = window.RPGAtlasJournalView.create({
+    el,
+    esc,
+    pushUI,
+    removeUI,
+    sysSe,
+    appendUI: (node) => uiLayer.appendChild(node),
+    showMessage: (...args) => showMessage(...args),
+    getProj: () => proj,
+    questState,
+    Quests,
+  });
+  async function menuJournal() {
+    return journalView.open();
+  }
 
   async function openMenu() {
     if (menuOpen || blockingRun) return;
@@ -1722,7 +1818,7 @@ const _createMessageSystem = window.createMessageSystem;
       while (true) {
         refreshPanel();
         const i = await showList(
-          [
+          [            
             { html: Assets.iconHtml(24, "menu-icon") + "Items" },
             { html: Assets.iconHtml(8, "menu-icon") + "Skills" },
             { html: Assets.iconHtml(48, "menu-icon") + "Equip" },
@@ -1733,6 +1829,7 @@ const _createMessageSystem = window.createMessageSystem;
                   "menu-icon",
                 ) + "Status",
             },
+            { html: Assets.iconHtml(16, "menu-icon") + "Journal" },
             { html: Assets.iconHtml(44, "menu-icon") + "Save" },
             { html: Assets.iconHtml(45, "menu-icon") + "Load" },
             { html: Assets.iconHtml(47, "menu-icon") + "To Title" },
@@ -1741,14 +1838,27 @@ const _createMessageSystem = window.createMessageSystem;
         );
         if (i < 0) break;
         idx = i;
-        if (i === 0) await menuItems();
-        else if (i === 1) await menuSkills();
-        else if (i === 2) await menuEquip();
-        else if (i === 3) await menuStatus();
-        else if (i === 4) await saveLoadMenu("save");
-        else if (i === 5) {
-          if (await saveLoadMenu("load")) break;
+        
+        if (i === 0) {
+          await menuItems();
+        } else if (i === 1) {
+          await menuSkills();
+        } else if (i === 2) {
+          await menuEquip();
+        } else if (i === 3) {
+          await menuStatus();
+        } else if (i === 4) {
+          panel.style.display = "none";
+          try {
+            if (await menuJournal() === "close") return;
+          } finally {
+            panel.style.display = "";
+          }
+        } else if (i === 5) {
+          await saveLoadMenu("save");
         } else if (i === 6) {
+          if (await saveLoadMenu("load")) break;
+        } else if (i === 7) {
           const c = await showList(
             [{ label: "Return to title" }, { label: "Cancel" }],
             { className: "choicewin" },
@@ -2003,6 +2113,7 @@ const _createMessageSystem = window.createMessageSystem;
           switches: G.switches,
           vars: G.vars,
           selfSw: G.selfSw,
+          quests: G.quests,
           party: G.party,
           inv: G.inv,
           gold: G.gold,
@@ -2033,6 +2144,7 @@ const _createMessageSystem = window.createMessageSystem;
     G.switches = d.switches || {};
     G.vars = d.vars || {};
     G.selfSw = d.selfSw || {};
+    G.quests = d.quests || {};
     G.party = d.party || [];
     G.inv = d.inv || { item: {}, weapon: {}, armor: {} };
     G.party.forEach((a) => {
@@ -2596,6 +2708,7 @@ const _createMessageSystem = window.createMessageSystem;
         }
         refreshEnemies();
         if (wasAlive && !en.alive) {
+          onEnemyKilled(en.d.id);
           burst(target, "death", { count: 22, radius: 62, duration: 650 });
           floatText(target, "DEFEATED", "death");
         }
@@ -3077,6 +3190,7 @@ const _createMessageSystem = window.createMessageSystem;
           refreshParty();
           for (const m of lines) await say(m, 800);
         } else if (result === "lose") {
+          noteBattleFailure(troopId, troop.enemies.map((id) => Number(id) || 0));
           await say("The party has fallen...", 1100);
         }
       } finally {
@@ -3100,20 +3214,9 @@ const _createMessageSystem = window.createMessageSystem;
   // ============================ title / gameover ============================
   function initPlayer(x, y, dir) {
     G.player = {
-      x,
-      y,
-      rx: x,
-      ry: y,
-      tx: x,
-      ty: y,
-      dir: dir == null ? 0 : dir,
-      moving: false,
-      animT: 0,
-      frame: 1,
-      route: null,
-      kind: "human",
-      charsetIdx: 0,
-      page: null,
+      x, y, rx: x, ry: y, prx: x, pry: y, tx: x, ty: y, dir: dir == null ? 0 : dir,
+      moving: false, animT: 0, frame: 1, route: null, kind: "human",
+      charsetIdx: 0, page: null,
     };
     // Continuous/pixel properties (used when pixelMovement is enabled).
     const tileSize = TILE || 48;
@@ -3145,6 +3248,7 @@ const _createMessageSystem = window.createMessageSystem;
     G.switches = {};
     G.vars = {};
     G.selfSw = {};
+    G.quests = {};
     G.gold = proj.system.startGold || 0;
     G.inv = { item: {}, weapon: {}, armor: {} };
     G.party = (proj.system.party || [])
@@ -3401,7 +3505,7 @@ const _createMessageSystem = window.createMessageSystem;
     document.title = (proj.system.title || "RPGAtlas") + " — RPGAtlas Player";
     scene = "title";
     showTitle();
-    loop();
+    requestAnimationFrame(loop);   // kick off via rAF so loop() receives a real timestamp
 
     // unlock audio on first interaction
     const unlock = () => {

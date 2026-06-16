@@ -10,11 +10,19 @@ import {
   loadStoredProject,
   saveProject,
 } from "./editor/project-io.js";
+import * as host from "./editor/host.js";
+import { createEditorI18n } from "./editor/i18n.js";
 import { PATCH_NOTES } from "./patch-notes.js";
 
 const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window.RPGAtlasDeps;
+const editorI18n = createEditorI18n({
+  storage: window.localStorage,
+  document,
+  browserLocale: navigator.language,
+});
 
 (() => {
+  const t = editorI18n.t;
   const TILE = Assets.TILE;
   const LAYER_ORDER = ["ground", "decor", "decor2", "over"];
   const LAYER_LABELS = { auto: "Auto layer", ground: "Layer 1 (Ground)", decor: "Layer 2 (Decor)", decor2: "Layer 3 (Decor 2)", over: "Layer 4 (Overhead)" };
@@ -42,6 +50,8 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
   let selection = null;      // {x1,y1,x2,y2} inclusive (map mode)
   let clipTiles = null;      // tile clipboard {w,h,layers,shadows}
   let clipEvent = null;      // event clipboard (cloned event)
+  let clipCmd = null;        // event-command clipboard (array of cloned commands) — shared across event editors
+  let clipPage = null;       // event-page clipboard (cloned page) — shared across event editors
   let pasteMode = null;      // null | "tiles" | "event"
   // ---- Phase 4 — grid-free editor state ----
   // ---- grid-free editor state ----
@@ -127,7 +137,7 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
     return h("span", { class: "rangewrap" }, r, out);
   }
   function field(label, input) {
-    return h("label", { class: "fld" }, h("span", null, label), input);
+    return h("label", { class: "fld" }, h("span", null, t(label)), input);
   }
   function row(...kids) { return h("div", { class: "frow" }, ...kids); }
 
@@ -184,13 +194,18 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
     if (noneLabel != null) o.unshift({ v: 0, l: noneLabel });
     return o;
   }
+  function stringSelOpts(values) {
+    const o = values.map((v) => ({ v, l: v }));
+    o.stringValues = true;
+    return o;
+  }
 
   // ============================ modal framework ============================
   const modalRoot = () => $("modal-root");
   function modal(opts) {
     const overlay = h("div", { class: "overlay" });
     const win = h("div", { class: "modal " + (opts.wide ? "wide " : "") + (opts.class || "") });
-    win.appendChild(h("div", { class: "modal-title" }, opts.title || ""));
+    win.appendChild(h("div", { class: "modal-title" }, t(opts.title || "")));
     const body = h("div", { class: "modal-body" });
     if (opts.content) body.appendChild(opts.content);
     win.appendChild(body);
@@ -203,7 +218,7 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
       btnrow.appendChild(h("button", {
         class: b.primary ? "primary" : "",
         onclick() { if (b.onClick) b.onClick(close); else close(); },
-      }, b.label));
+      }, t(b.label)));
     });
     win.appendChild(btnrow);
     overlay.appendChild(win);
@@ -225,7 +240,7 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
   // ============================ persistence ============================
   let saveTimer = null;
   function touch() {
-    $("save-ind").textContent = "● unsaved";
+    $("save-ind").textContent = "● " + t("unsaved");
     clearTimeout(saveTimer);
     saveTimer = setTimeout(saveNow, 700);
     hdMarkDirty(); // keep the HD-2D preview in sync with edits
@@ -233,16 +248,36 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
   function saveNow() {
     try {
       saveProject(localStorage, proj);
-      $("save-ind").textContent = "✓ saved";
+      $("save-ind").textContent = "✓ " + t("saved");
     } catch (e) {
-      $("save-ind").textContent = "⚠ save failed";
+      $("save-ind").textContent = "⚠ " + t("save failed");
       console.error(e);
     }
   }
   function loadStored() {
     return loadStoredProject(localStorage, (project) => RA.migrateProject(project));
   }
+  // Desktop: the .json file the project is bound to. Save (Ctrl+S) writes here
+  // silently once set; the first save — or Export (Save As) — prompts for it.
+  let currentProjectPath = null;
+  function baseName(p) { return String(p).replace(/^.*[\\/]/, ""); }
+  async function desktopSave(saveAs) {
+    saveNow(); // keep the local autosave as a crash-recovery copy
+    try {
+      if (saveAs || !currentProjectPath) {
+        const path = await host.saveProjectToFile(proj); // native Save dialog
+        if (!path) { flashStatus("Saved locally — file save cancelled"); return; }
+        currentProjectPath = path;
+      } else {
+        await host.saveProjectToPath(currentProjectPath, proj); // silent overwrite
+      }
+      flashStatus("Project saved to " + baseName(currentProjectPath));
+    } catch (e) {
+      flashStatus("Save failed: " + e.message);
+    }
+  }
   function exportProject() {
+    if (host.isTauri) { desktopSave(true); return; } // Export = Save As on desktop
     exportProjectFile(proj);
   }
   function openStandaloneExport() {
@@ -1302,12 +1337,15 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
   function setStatus() {
     const m = curMap();
     let s = m ? m.name + " (" + m.width + "×" + m.height + ")" : "";
-    s += "  ·  " + (mode === "map" ? TOOL_LABELS[tool] + " / " + LAYER_LABELS[layer]
-      : mode === "event" ? "Event mode (double-click = new/edit, drag = move)"
-      : mode === "pass" ? "Passability (click cycles auto → ✕ block → ○ pass)"
-      : mode === "height" ? "Heights — painting " + heightVal + " with " + TOOL_LABELS[tool] + " (keys 0–9 set the value, right-click picks, Eraser clears)"
-      : mode === "collision" ? "Collision — click grid cells to edit per-tile rects, click empty area to create free-form masks (Delete removes selected, Esc deselects)"
-      : "Click the map to set the start position");
+    s += "  ·  " + (mode === "map" ? t(TOOL_LABELS[tool]) + " / " + t(LAYER_LABELS[layer])
+      : mode === "event" ? t("Event mode (double-click = new/edit, drag = move)")
+      : mode === "pass" ? t("Passability (click cycles auto → ✕ block → ○ pass)")
+      : mode === "height" ? t("Heights — painting {value} with {tool} (keys 0–9 set the value, right-click picks, Eraser clears)", {
+        value: heightVal,
+        tool: t(TOOL_LABELS[tool]),
+      })
+      : mode === "collision" ? t("Collision — click grid cells to edit per-tile rects, click empty area to create free-form masks (Delete removes selected, Esc deselects)")
+      : t("Click the map to set the start position"));
     if (hoverCell && m) {
       s += "  ·  " + hoverCell.x + "," + hoverCell.y;
       if (mode === "map" && m.gridFree && m.tilePlacements) {
@@ -1330,15 +1368,15 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
         s += "  ·  " + ln + ": " + (Assets.tiles[t] ? Assets.tiles[t].name : "?");
       }
       if (mode === "pass") {
-        s += "  ·  " + (effectivePass(hoverCell.x, hoverCell.y) ? "○ passable" : "✕ blocked") +
-          (m.passOv[hoverCell.y * m.width + hoverCell.x] ? " (override)" : "");
+        s += "  ·  " + (effectivePass(hoverCell.x, hoverCell.y) ? "○ " + t("passable") : "✕ " + t("blocked")) +
+          (m.passOv[hoverCell.y * m.width + hoverCell.x] ? " (" + t("override") + ")" : "");
       }
       const ev = mode !== "map" && eventAt(hoverCell.x, hoverCell.y);
       if (ev) s += "  ·  " + ev.name;
     }
-    if (mode === "map" && selection) s += "  ·  selection " + (selection.x2 - selection.x1 + 1) + "×" + (selection.y2 - selection.y1 + 1);
+    if (mode === "map" && selection) s += "  ·  " + t("selection") + " " + (selection.x2 - selection.x1 + 1) + "×" + (selection.y2 - selection.y1 + 1);
     if (mode === "map") {
-      s += "  ·  brush: " + (Assets.tiles[selectedTile] ? Assets.tiles[selectedTile].name : "?");
+      s += "  ·  " + t("brush") + ": " + (Assets.tiles[selectedTile] ? Assets.tiles[selectedTile].name : "?");
       if (m && m.gridFree) s += "  ·  snap: " + snapMode;
     }
     $("status-text").textContent = s;
@@ -1849,7 +1887,7 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
       m.layers.ground[exitCell.y * w + exitCell.x] = exitTile;
       
       e.pages[0] = {
-        cond: { switchId: 0, varId: 0, varVal: 0, selfSw: "" },
+        cond: { switchId: 0, varId: 0, varVal: 0, selfSw: "", questId: 0, questStatus: "active", objectiveQuestId: 0, objectiveIndex: 0, objectiveStatus: "completed" },
         charset: "", dir: 0,
         moveType: "fixed", trigger: "touch", priority: "below", through: true,
         commands: [
@@ -1893,7 +1931,7 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
       }
       
       e.pages[0] = {
-        cond: { switchId: 0, varId: 0, varVal: 0, selfSw: "" },
+        cond: { switchId: 0, varId: 0, varVal: 0, selfSw: "", questId: 0, questStatus: "active", objectiveQuestId: 0, objectiveIndex: 0, objectiveStatus: "completed" },
         charset: "chest", dir: 0,
         moveType: "fixed", trigger: "action", priority: "same", through: false,
         commands: [
@@ -1904,7 +1942,7 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
         ],
       };
       e.pages.push({
-        cond: { switchId: 0, varId: 0, varVal: 0, selfSw: "A" },
+        cond: { switchId: 0, varId: 0, varVal: 0, selfSw: "A", questId: 0, questStatus: "active", objectiveQuestId: 0, objectiveIndex: 0, objectiveStatus: "completed" },
         charset: "chest_open", dir: 0,
         moveType: "fixed", trigger: "action", priority: "same", through: false,
         commands: [
@@ -2142,7 +2180,17 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
   }
   function toggleHdPreview() {
     if (hdPanel) { closeHdPreview(); return; }
-    if (typeof GLRender === "undefined" || !GLRender.available()) {
+    // The in-editor HD-2D live preview was built on the old synchronous GLRender. The new
+    // PIXI renderer (Renderer, aliased to GLRender) is async and renders to its own canvas,
+    // so this preview needs a PIXI rewrite — disable it gracefully until then rather than
+    // throwing every frame. (The in-game HD-2D rendering uses the new renderer fully.)
+    const asyncRenderer = typeof GLRender !== "undefined" && GLRender.available &&
+      GLRender.available.constructor && GLRender.available.constructor.name === "AsyncFunction";
+    if (typeof GLRender === "undefined" || asyncRenderer) {
+      flashStatus("HD-2D live preview is being rebuilt on the new PIXI renderer — unavailable for now");
+      return;
+    }
+    if (!GLRender.available()) {
       flashStatus("HD-2D preview needs WebGL2, which is unavailable in this browser");
       return;
     }
@@ -2183,6 +2231,12 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
     const swName = (id) => id + (proj.system.switches[id - 1] ? " (" + proj.system.switches[id - 1] + ")" : "");
     const varName = (id) => id + (proj.system.variables[id - 1] ? " (" + proj.system.variables[id - 1] + ")" : "");
     const dbName = (arr, id) => { const e = RA.byId(arr, id); return e ? e.name : "#" + id; };
+    const questName = (id) => dbName(proj.quests || [], id);
+    const questObjName = (questId, objIndex) => {
+      const q = RA.byId(proj.quests || [], questId);
+      const obj = q && Array.isArray(q.objectives) ? q.objectives[objIndex] : null;
+      return obj ? (obj.label || obj.kind || ("Objective " + (objIndex + 1))) : ("Objective " + (objIndex + 1));
+    };
     switch (c.t) {
       case "text": return "Text" + (c.name ? " [" + c.name + "]" : "") + (c.face ? " (face)" : "") + ": " + c.text.split("\n")[0].slice(0, 42);
       case "choices": return "Show Choices: " + c.options.join(" / ");
@@ -2194,10 +2248,16 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
         let d = k === "switch" ? "Switch " + swName(c.cond.id) + (c.cond.val === false ? " is OFF" : " is ON")
           : k === "var" ? "Var " + varName(c.cond.id) + " " + (c.cond.cmp || ">=") + " " + c.cond.val
           : k === "selfsw" ? "Self-Switch " + c.cond.key + " is ON"
+          : k === "quest" ? "Quest " + questName(c.cond.questId) + " is " + (c.cond.status || "active")
           : k === "item" ? "Has " + dbName(c.cond.itemKind === "weapon" ? proj.weapons : c.cond.itemKind === "armor" ? proj.armors : proj.items, c.cond.id)
           : "Gold " + (c.cond.cmp || ">=") + " " + c.cond.val;
         return "If " + d;
       }
+      case "questStart": return "Start Quest: " + questName(c.questId);
+      case "questAdvanceObj": return "Advance Objective: " + questName(c.questId) + " — " + questObjName(c.questId, c.objIndex) + " +" + (c.amount || 1);
+      case "questSetObj": return "Set Objective: " + questName(c.questId) + " — " + questObjName(c.questId, c.objIndex) + " = " + (c.value || 0);
+      case "questComplete": return "Complete Quest: " + questName(c.questId);
+      case "questFail": return "Fail Quest: " + questName(c.questId);
       case "transfer": { const m = RA.byId(proj.maps, c.mapId); return "Transfer → " + (m ? m.name : "?") + " (" + c.x + "," + c.y + ")"; }
       case "gold": return (c.op === "sub" ? "Lose" : "Gain") + " " + c.val + " " + proj.system.currency;
       case "item": return (c.op === "sub" ? "Lose" : "Gain") + " " + dbName(c.kind === "weapon" ? proj.weapons : c.kind === "armor" ? proj.armors : proj.items, c.id) + " ×" + c.val;
@@ -2332,6 +2392,9 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
               field("Value", nIn(w, "val"))));
           } else if (w.kind === "selfsw") {
             sub.appendChild(field("Self-Switch", sel(w, "key", [{ v: "A", l: "A" }, { v: "B", l: "B" }, { v: "C", l: "C" }, { v: "D", l: "D" }])));
+          } else if (w.kind === "quest") {
+            sub.appendChild(row(field("Quest", sel(w, "questId", dbOpts(proj.quests, "(none)"))),
+              field("Status", sel(w, "status", stringSelOpts(["inactive", "active", "completed", "failed", "abandoned"])))));
           } else if (w.kind === "item") {
             const kindSel = sel(w, "itemKind", [{ v: "item", l: "Item" }, { v: "weapon", l: "Weapon" }, { v: "armor", l: "Armor" }], redrawItem);
             sub.appendChild(row(field("Kind", kindSel), field("Entry", h("span", { id: "ifitem" }))));
@@ -2375,10 +2438,14 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
         }
         box.appendChild(field("Condition type", sel(w, "kind", [
           { v: "switch", l: "Switch" }, { v: "var", l: "Variable" }, { v: "selfsw", l: "Self-Switch" },
-          { v: "item", l: "Has item" }, { v: "gold", l: "Gold" }, { v: "actor", l: "Actor" }
+          { v: "quest", l: "Quest Status" }, { v: "item", l: "Has item" }, { v: "gold", l: "Gold" }, { v: "actor", l: "Actor" }
         ], redraw)));
         if (w.kind === "item" && !w.itemKind) w.itemKind = "item";
         if (w.kind === "selfsw" && !w.key) w.key = "A";
+        if (w.kind === "quest") {
+          if (w.questId == null) w.questId = 0;
+          if (!w.status) w.status = "active";
+        }
         box.appendChild(sub);
         redraw();
         return () => {
@@ -2388,6 +2455,52 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
           if (!c.then) c.then = [];
           if (!c.else) c.else = [];
         };
+      } },
+    { t: "questStart", label: "Start Quest", make: () => ({ t: "questStart", questId: proj.quests[0] ? proj.quests[0].id : 0 }),
+      form(c, box) {
+        const w = { questId: c.questId || (proj.quests[0] ? proj.quests[0].id : 0) };
+        box.appendChild(field("Quest", sel(w, "questId", dbOpts(proj.quests, "(none)"))));
+        return () => { c.questId = w.questId; };
+      } },
+    { t: "questAdvanceObj", label: "Advance Quest Objective", make: () => ({ t: "questAdvanceObj", questId: proj.quests[0] ? proj.quests[0].id : 0, objIndex: 0, amount: 1 }),
+      form(c, box) {
+        const w = { questId: c.questId || (proj.quests[0] ? proj.quests[0].id : 0), objIndex: c.objIndex || 0, amount: c.amount || 1 };
+        const objWrap = h("span");
+        function redrawObj() {
+          const q = RA.byId(proj.quests, w.questId);
+          const opts = (q && q.objectives && q.objectives.length ? q.objectives : [{ label: "(none)" }]).map((obj, i) => ({ v: i, l: (i + 1) + ": " + (obj.label || obj.kind || "Objective") }));
+          objWrap.innerHTML = "";
+          objWrap.appendChild(sel(w, "objIndex", opts));
+        }
+        redrawObj();
+        box.appendChild(row(field("Quest", sel(w, "questId", dbOpts(proj.quests, "(none)"), redrawObj)), field("Objective", objWrap), field("Amount", nIn(w, "amount", 1, 999))));
+        return () => Object.assign(c, w);
+      } },
+    { t: "questSetObj", label: "Set Quest Objective Progress", make: () => ({ t: "questSetObj", questId: proj.quests[0] ? proj.quests[0].id : 0, objIndex: 0, value: 0 }),
+      form(c, box) {
+        const w = { questId: c.questId || (proj.quests[0] ? proj.quests[0].id : 0), objIndex: c.objIndex || 0, value: c.value || 0 };
+        const objWrap = h("span");
+        function redrawObj() {
+          const q = RA.byId(proj.quests, w.questId);
+          const opts = (q && q.objectives && q.objectives.length ? q.objectives : [{ label: "(none)" }]).map((obj, i) => ({ v: i, l: (i + 1) + ": " + (obj.label || obj.kind || "Objective") }));
+          objWrap.innerHTML = "";
+          objWrap.appendChild(sel(w, "objIndex", opts));
+        }
+        redrawObj();
+        box.appendChild(row(field("Quest", sel(w, "questId", dbOpts(proj.quests, "(none)"), redrawObj)), field("Objective", objWrap), field("Value", nIn(w, "value", 0, 999))));
+        return () => Object.assign(c, w);
+      } },
+    { t: "questComplete", label: "Complete Quest", make: () => ({ t: "questComplete", questId: proj.quests[0] ? proj.quests[0].id : 0 }),
+      form(c, box) {
+        const w = { questId: c.questId || (proj.quests[0] ? proj.quests[0].id : 0) };
+        box.appendChild(field("Quest", sel(w, "questId", dbOpts(proj.quests, "(none)"))));
+        return () => { c.questId = w.questId; };
+      } },
+    { t: "questFail", label: "Fail Quest", make: () => ({ t: "questFail", questId: proj.quests[0] ? proj.quests[0].id : 0 }),
+      form(c, box) {
+        const w = { questId: c.questId || (proj.quests[0] ? proj.quests[0].id : 0) };
+        box.appendChild(field("Quest", sel(w, "questId", dbOpts(proj.quests, "(none)"))));
+        return () => { c.questId = w.questId; };
       } },
     { t: "switch", label: "Control Switch", make: () => ({ t: "switch", id: 1, val: true }),
       form(c, box) {
@@ -2612,13 +2725,13 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
     { t: "script", label: "Script (JavaScript)", make: () => ({ t: "script", code: "" }),
       form(c, box) {
         const ta = h("textarea", { rows: 6, spellcheck: "false" }, c.code || "");
-        box.appendChild(field("JS — api: game.setSwitch(id,v) getSwitch setVar getVar addGold(n) party() state()", ta));
+        box.appendChild(field("JS — api: game.setSwitch(id,v) getSwitch setVar getVar addGold(n) party() quest(id) questStatus startQuest advanceQuestObjective setQuestObjective completeQuest failQuest abandonQuest state()", ta));
         return () => { c.code = ta.value; };
       } },
   ];
   const cmdDef = (t) => CMD_DEFS.find((d) => d.t === t);
 
-  function editCommand(c, onDone) {
+  function editCommand(c, onDone, skipSnapshot, snapFn) {
     const def = cmdDef(c.t);
     const box = h("div");
     const apply = def.form(c, box) || (() => {});
@@ -2626,7 +2739,7 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
       title: def.label,
       content: box,
       buttons: [
-        { label: "OK", primary: true, onClick(close) { apply(); close(); touch(); onDone(); } },
+        { label: "OK", primary: true, onClick(close) { if (!skipSnapshot && snapFn) snapFn(); apply(); close(); touch(); onDone(); } },
         { label: "Cancel", onClick(close) { close(); onDone(); } },
       ],
       dismissable: false,
@@ -2738,65 +2851,246 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
       }
     });
   }
-  function cmdListWidget(getList) {
+  function cmdListWidget(getList, undoApi) {
     const wrap = h("div", { class: "cmdlist-wrap" });
-    const listEl = h("div", { class: "cmdlist" });
-    let selRow = null, rows = [];
-    function redraw() {
+    const listEl = h("div", { class: "cmdlist", tabindex: "0" });
+    const snap = undoApi.snapshot;             // snapshot before a mutation
+    let selRow = null, anchorRow = null, rows = [], dragFromIdx = null, cmdMenuEl = null;
+    let dragBlock = null, dragFromArr = null, dragFrom = 0, dragCount = 0;
+    function clearDropMarks() {
+      listEl.querySelectorAll(".drop-before, .drop-after").forEach((d) => d.classList.remove("drop-before", "drop-after"));
+    }
+    // True when `arr` is one of cmd's own branch arrays, or nested inside one —
+    // so a container command (if/choices) is never dropped into its own subtree.
+    function ownsArray(cmd, arr) {
+      if (!cmd) return false;
+      const branches = cmd.t === "if" ? [cmd.then, cmd.else]
+        : cmd.t === "choices" ? (cmd.branches || []) : [];
+      for (const b of branches) {
+        if (b === arr) return true;
+        for (const c of b) if (ownsArray(c, arr)) return true;
+      }
+      return false;
+    }
+    // A command may be dropped onto any command row or end-of-branch slot, at any
+    // nesting level in this event — except onto itself or inside its own subtree.
+    function dropOk(target) {
+      if (!dragBlock) return false;
+      if (!target.arr || !(target.cmd || target.slot)) return false;
+      if (dragBlock.includes(target.cmd)) return false;            // not onto a member of the dragged block
+      return !dragBlock.some((c) => ownsArray(c, target.arr));     // not into any block member's own subtree
+    }
+    function redraw(reselect) {
       rows = [];
       buildCmdRows(getList(), 0, rows);
       rows.push({ arr: getList(), idx: getList().length, depth: 0, slot: true });
+      if (reselect) { // re-find the moved/pasted command(s) by identity so the selection follows them
+        const cmds = Array.isArray(reselect) ? reselect : [reselect];
+        let first = -1, last = -1;
+        rows.forEach((r3, i) => { if (r3.cmd && cmds.indexOf(r3.cmd) >= 0) { if (first < 0) first = i; last = i; } });
+        if (first >= 0) { anchorRow = first; selRow = last; } // focus = last → repeated paste/move stacks
+      }
       listEl.innerHTML = "";
+      const blk = selBlock(); // the contiguous multi-selection (or the single focused command)
       rows.forEach((r2, i) => {
+        const inBlk = blk && r2.cmd && r2.arr === blk.arr && r2.idx >= blk.lo && r2.idx <= blk.hi;
         const div = h("div", {
-          class: "cmdrow" + (r2.label ? " branch" : "") + (r2.slot ? " slot" : "") + (selRow === i ? " sel" : ""),
+          class: "cmdrow" + (r2.label ? " branch" : "") + (r2.slot ? " slot" : "")
+            + (i === selRow ? " sel" : (inBlk ? " cmd-selected" : "")),
           style: "padding-left:" + (8 + r2.depth * 18) + "px",
-          onclick() { selRow = i; redraw(); },
-          ondblclick() { selRow = i; if (r2.slot) addAt(r2); else if (r2.cmd) editAt(r2); },
+          onclick(e) {
+            if (e.shiftKey && anchorRow != null && rows[anchorRow] && r2.cmd && r2.arr === rows[anchorRow].arr)
+              selRow = i;                    // extend the range within one sibling list
+            else anchorRow = selRow = i;     // plain click / re-anchor (foreign branch, label, slot, ctrl)
+            redraw(); listEl.focus({ preventScroll: true });
+          },
+          ondblclick() { anchorRow = selRow = i; if (r2.slot) addAt(r2); else if (r2.cmd) editAt(r2); },
+          oncontextmenu(e) { openCmdMenu(e, i); },
         }, r2.label ? r2.label : r2.slot ? "◇ …" : "◆ " + cmdSummary(r2.cmd));
+        if (r2.cmd) {
+          div.draggable = true;
+          div.addEventListener("dragstart", (e) => {
+            const b = selBlock();
+            const inB = b && r2.arr === b.arr && r2.idx >= b.lo && r2.idx <= b.hi;
+            if (inB) { dragBlock = b.cmds; dragFromArr = b.arr; dragFrom = b.lo; dragCount = b.count; }
+            else { anchorRow = selRow = i; dragBlock = [r2.cmd]; dragFromArr = r2.arr; dragFrom = r2.idx; dragCount = 1; }
+            dragFromIdx = i;
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData("text/plain", "cmd"); // Firefox needs data to start a drag
+            div.classList.add("dragging");
+          });
+          div.addEventListener("dragend", () => { div.classList.remove("dragging"); clearDropMarks(); dragFromIdx = null; dragBlock = null; });
+        }
+        div.addEventListener("dragover", (e) => {
+          if (!dropOk(r2)) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          clearDropMarks();
+          if (r2.slot) { div.classList.add("drop-before"); return; } // slot = drop at end of level
+          const rect = div.getBoundingClientRect();
+          div.classList.add(e.clientY - rect.top < rect.height / 2 ? "drop-before" : "drop-after");
+        });
+        div.addEventListener("dragleave", () => div.classList.remove("drop-before", "drop-after"));
+        div.addEventListener("drop", (e) => {
+          if (!dropOk(r2)) return;
+          e.preventDefault();
+          const toArr = r2.arr;
+          let to = r2.idx; // slot => end of branch (idx == length)
+          if (!r2.slot) {
+            const rect = div.getBoundingClientRect();
+            to = e.clientY - rect.top < rect.height / 2 ? r2.idx : r2.idx + 1;
+          }
+          clearDropMarks();
+          if (dragFromArr === toArr && to >= dragFrom && to <= dragFrom + dragCount) { dragBlock = null; dragFromIdx = null; return; } // lands inside itself
+          snap();
+          dragFromArr.splice(dragFrom, dragCount);
+          if (dragFromArr === toArr && to > dragFrom) to -= dragCount; // adjust for the gap we just removed
+          toArr.splice(to, 0, ...dragBlock);
+          const moved = dragBlock; dragBlock = null; dragFromIdx = null;
+          touch(); redraw(moved); // keep the moved block selected
+        });
         listEl.appendChild(div);
       });
     }
     function cur() { return selRow != null ? rows[selRow] : null; }
+    // The current selection as a contiguous block within ONE sibling array: the run between
+    // anchorRow and the focused row, or just the focused command. Null if nothing usable is selected.
+    function selBlock() {
+      const a = rows[anchorRow], f = cur();
+      if (a && f && a.cmd && f.cmd && a.arr === f.arr) {
+        const arr = a.arr, lo = Math.min(a.idx, f.idx), hi = Math.max(a.idx, f.idx);
+        return { arr, lo, hi, count: hi - lo + 1, cmds: arr.slice(lo, hi + 1) };
+      }
+      return (f && f.cmd) ? { arr: f.arr, lo: f.idx, hi: f.idx, count: 1, cmds: [f.cmd] } : null;
+    }
     function addAt(r2) {
       let target = r2 || cur();
       if (!target || (!target.slot && !target.cmd)) target = { arr: getList(), idx: getList().length };
       pickCommand((nc) => {
+        snap();
         target.arr.splice(target.idx, 0, nc);
         touch();
-        editCommand(nc, redraw);
-        redraw();
+        editCommand(nc, redraw, true);   // suppress: this snapshot already covers the whole add
+        redraw(nc);
       });
     }
     function editAt(r2) {
       const target = r2 || cur();
       if (!target || !target.cmd) return;
-      editCommand(target.cmd, redraw);
+      editCommand(target.cmd, redraw, false, snap);   // edit path snapshots on OK (before apply)
     }
     function delAt() {
-      const target = cur();
-      if (!target || !target.cmd) return;
-      target.arr.splice(target.idx, 1);
-      touch(); redraw();
+      const b = selBlock();
+      if (!b) return;
+      snap();
+      b.arr.splice(b.lo, b.count);
+      touch();
+      const survivor = b.arr.length ? b.arr[Math.min(b.lo, b.arr.length - 1)] : null;
+      anchorRow = selRow = null;
+      redraw(survivor || undefined);
     }
     function moveSel(d) {
-      const target = cur();
-      if (!target || !target.cmd) return;
-      const ni = target.idx + d;
-      if (ni < 0 || ni >= target.arr.length) return;
-      const [c] = target.arr.splice(target.idx, 1);
-      target.arr.splice(ni, 0, c);
+      const b = selBlock();
+      if (!b) return;
+      if (d < 0 && b.lo <= 0) return;
+      if (d > 0 && b.hi >= b.arr.length - 1) return;
+      snap();
+      const blk = b.arr.splice(b.lo, b.count);
+      b.arr.splice(b.lo + d, 0, ...blk);
       touch();
-      selRow += 0; // selection follows roughly; rebuild
-      redraw();
+      redraw(blk); // the whole block follows so ↑/↓ can be tapped repeatedly
+    }
+    function copySel(cut) {
+      const b = selBlock();
+      if (!b) return;
+      clipCmd = b.cmds.map((c) => RA.clone(c));
+      flashStatus((cut ? "Cut " : "Copied ") + b.count + (b.count > 1 ? " commands" : " command"));
+      if (cut) {
+        snap();
+        b.arr.splice(b.lo, b.count);
+        touch();
+        const survivor = b.arr.length ? b.arr[Math.min(b.lo, b.arr.length - 1)] : null;
+        anchorRow = selRow = null;
+        redraw(survivor || undefined);
+      }
+    }
+    function pasteSel() {
+      const block = Array.isArray(clipCmd) ? clipCmd : (clipCmd ? [clipCmd] : null);
+      if (!block || !block.length) { flashStatus("Clipboard is empty — copy a command first"); return; }
+      const target = cur();
+      let arr, idx;
+      if (target && target.cmd) { arr = target.arr; idx = target.idx + 1; }   // after the focused command
+      else if (target && target.slot) { arr = target.arr; idx = target.idx; } // at the insertion slot
+      else { arr = getList(); idx = getList().length; }                       // nothing selected → end of list
+      const clones = block.map((c) => RA.clone(c));
+      snap();
+      arr.splice(idx, 0, ...clones);
+      touch(); redraw(clones); // select the pasted block so repeated Ctrl+V stacks
+    }
+    function closeCmdMenu() {
+      if (!cmdMenuEl) return;
+      cmdMenuEl.remove(); cmdMenuEl = null;
+      document.removeEventListener("mousedown", onCmdMenuOutside, true);
+      document.removeEventListener("keydown", onCmdMenuKey, true);
+    }
+    function onCmdMenuOutside(ev) { if (cmdMenuEl && !cmdMenuEl.contains(ev.target)) closeCmdMenu(); }
+    function onCmdMenuKey(ev) { if (ev.key === "Escape") { ev.preventDefault(); closeCmdMenu(); } }
+    // Right-click a command (or insertion slot) for the same actions as the toolbar buttons.
+    function openCmdMenu(e, i) {
+      e.preventDefault();
+      if (!rows[i] || (!rows[i].cmd && !rows[i].slot)) return; // labels: just suppress the native menu
+      const x = e.clientX, y = e.clientY;
+      const b0 = selBlock(); // keep an existing multi-selection if the right-click lands inside it
+      const inBlk = b0 && rows[i].cmd && rows[i].arr === b0.arr && rows[i].idx >= b0.lo && rows[i].idx <= b0.hi;
+      if (!inBlk) anchorRow = selRow = i;
+      redraw(); listEl.focus({ preventScroll: true });
+      closeCmdMenu();
+      const b = selBlock(), isCmd = !!b, n = b ? b.count : 0, sfx = n > 1 ? " " + n : "";
+      const canPaste = Array.isArray(clipCmd) ? clipCmd.length > 0 : !!clipCmd;
+      const canUp = !!b && b.lo > 0, canDown = !!b && b.hi < b.arr.length - 1;
+      const menu = h("div", { class: "menu-drop" });
+      const item = (label, key, on, fn) => menu.appendChild(h("div", {
+        class: "menu-item" + (on ? "" : " disabled"),
+        onclick() { if (!on) return; closeCmdMenu(); fn(); },
+      }, h("span", { class: "mi-label" }, label), key ? h("span", { class: "mi-key" }, key) : null));
+      const sep = () => menu.appendChild(h("div", { class: "menu-sep" }));
+      item("Add…", "", true, () => addAt());
+      item("Edit", "", isCmd, () => editAt());
+      sep();
+      item("Cut" + sfx, "Ctrl+X", isCmd, () => copySel(true));
+      item("Copy" + sfx, "Ctrl+C", isCmd, () => copySel(false));
+      item("Paste", "Ctrl+V", canPaste, () => pasteSel());
+      item("Delete" + sfx, "", isCmd, () => delAt());
+      sep();
+      item("Move Up", "", canUp, () => moveSel(-1));
+      item("Move Down", "", canDown, () => moveSel(1));
+      menu.style.left = x + "px"; menu.style.top = y + "px";
+      document.body.appendChild(menu);
+      menu.style.left = Math.max(4, Math.min(x, window.innerWidth - menu.offsetWidth - 4)) + "px";
+      menu.style.top = Math.max(4, Math.min(y, window.innerHeight - menu.offsetHeight - 4)) + "px";
+      cmdMenuEl = menu;
+      document.addEventListener("mousedown", onCmdMenuOutside, true);
+      document.addEventListener("keydown", onCmdMenuKey, true);
     }
     const btns = h("div", { class: "cmdbtns" },
       h("button", { onclick: () => addAt() }, "+ Add"),
       h("button", { onclick: () => editAt() }, "Edit"),
       h("button", { onclick: delAt }, "Delete"),
+      h("button", { title: "Copy command (Ctrl+C)", onclick: () => copySel(false) }, "Copy"),
+      h("button", { title: "Cut command (Ctrl+X)", onclick: () => copySel(true) }, "Cut"),
+      h("button", { title: "Paste command (Ctrl+V)", onclick: () => pasteSel() }, "Paste"),
       h("button", { onclick: () => moveSel(-1) }, "↑"),
       h("button", { onclick: () => moveSel(1) }, "↓"),
     );
+    // Ctrl+C/X/V and Delete work when the command list has focus. The global editor shortcuts
+    // are suppressed while a modal is open, so there's no collision with map copy/paste.
+    listEl.addEventListener("keydown", (e) => {
+      if (e.code === "Delete") { e.preventDefault(); delAt(); return; }
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.code === "KeyC") { e.preventDefault(); copySel(false); }
+      else if (e.code === "KeyX") { e.preventDefault(); copySel(true); }
+      else if (e.code === "KeyV") { e.preventDefault(); pasteSel(); }
+    });
     wrap.appendChild(btns);
     wrap.appendChild(listEl);
     redraw();
@@ -2807,22 +3101,170 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
   function openEventEditor(evOriginal) {
     const ev = RA.clone(evOriginal);
     let pageIdx = 0;
+
+    // Per-page command undo/redo, keyed by page object; discarded with `ev` when the editor closes.
+    const cmdHist = new Map();                 // page -> { undo, redo }
+    function histFor(p) {
+      let hst = cmdHist.get(p);
+      if (!hst) { hst = { undo: [], redo: [] }; cmdHist.set(p, hst); }
+      return hst;
+    }
+    const curPage = () => ev.pages[pageIdx];
+    function cmdSnapshot() {                    // call before mutating the current page's commands
+      const hst = histFor(curPage());
+      hst.undo.push(RA.clone(curPage().commands));
+      if (hst.undo.length > 60) hst.undo.shift();
+      hst.redo.length = 0;
+    }
+    function cmdStep(from, to) {
+      const hst = histFor(curPage());
+      if (!hst[from].length) { flashStatus(from === "undo" ? "Nothing to undo" : "Nothing to redo"); return false; }
+      hst[to].push(RA.clone(curPage().commands));
+      curPage().commands = RA.clone(hst[from].pop());   // re-clone so the archived entry stays immutable
+      touch();
+      return true;
+    }
+    const undoApi = {
+      snapshot: cmdSnapshot,
+      undo: () => cmdStep("undo", "redo"),
+      redo: () => cmdStep("redo", "undo"),
+    };
+    // Editor-wide keys (selection ≠ focus): Ctrl+Z/Y/Shift+Z undo/redo commands, Delete removes
+    // the highlighted page (the command list handles its own Delete), and 1–9 jump to a page.
+    // Defers to native field editing; inert while a nested Add/Edit dialog is the topmost modal.
+    let evOverlay = null;
+    function onEvKey(e) {
+      if (modalRoot().lastElementChild !== evOverlay) return;
+      if (pageMenuEl) return;                    // a page context menu is open — let it own the keys
+      const t = e.target;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT")) return;
+      const inCmdList = t && t.closest && t.closest(".cmdlist");   // the command list owns its own Delete/keys
+      if (e.ctrlKey || e.metaKey) {
+        if (e.code === "KeyZ" && e.shiftKey) { e.preventDefault(); if (undoApi.redo()) redrawPage(); }
+        else if (e.code === "KeyZ") { e.preventDefault(); if (undoApi.undo()) redrawPage(); }
+        else if (e.code === "KeyY") { e.preventDefault(); if (undoApi.redo()) redrawPage(); }
+        return;
+      }
+      if (e.code === "Delete" && !inCmdList) {
+        e.preventDefault(); deletePage(pageIdx); return;
+      }
+      if (e.key >= "1" && e.key <= "9" && !inCmdList) {   // jump to page 1–9 if it exists
+        const p = +e.key - 1;
+        if (p < ev.pages.length) { e.preventDefault(); pageIdx = p; redrawTabs(); redrawPage(); }
+      }
+    }
+    document.addEventListener("keydown", onEvKey);
+
     const head = h("div");
     const tabs = h("div", { class: "tabs" });
     const pageBox = h("div");
 
+    function deletePage(i) {
+      if (ev.pages.length <= 1) return;
+      const del = () => {
+        ev.pages.splice(i, 1);
+        if (pageIdx > i) pageIdx--;
+        pageIdx = Math.min(pageIdx, ev.pages.length - 1);
+        redrawTabs(); redrawPage();
+      };
+      const n = ev.pages[i].commands.length;   // confirm only if there are commands to lose (can't be undone)
+      if (n) confirmBox("This page has " + n + " command" + (n === 1 ? "" : "s") + " that will be permanently lost. Delete this page?", del);
+      else del();
+    }
+    function addPageAt(i) { ev.pages.splice(i, 0, DataDefaults.newPage()); pageIdx = i; redrawTabs(); redrawPage(); }
+    function copyPage(i) { clipPage = RA.clone(ev.pages[i]); flashStatus("Copied page " + (i + 1)); }
+    function pastePage(i) { if (!clipPage) return; ev.pages.splice(i + 1, 0, RA.clone(clipPage)); pageIdx = i + 1; redrawTabs(); redrawPage(); }
+    function movePage(i, d) {
+      const j = i + d;
+      if (j < 0 || j >= ev.pages.length) return;
+      ev.pages.splice(j, 0, ev.pages.splice(i, 1)[0]);
+      pageIdx = j; redrawTabs(); redrawPage();
+    }
+
+    // Page tabs: rename (double-click or menu), right-click menu, and drag-reorder.
+    let pageMenuEl = null, dragPageFrom = null, editingPage = null;
+    function startRename(i) { editingPage = i; redrawTabs(); }
+    function commitRename(i, value) { ev.pages[i].name = value.trim(); editingPage = null; touch(); redrawTabs(); redrawPage(); }
+    function closePageMenu() {
+      if (!pageMenuEl) return;
+      pageMenuEl.remove(); pageMenuEl = null;
+      document.removeEventListener("mousedown", onPageMenuOutside, true);
+      document.removeEventListener("keydown", onPageMenuKey, true);
+    }
+    function onPageMenuOutside(e) { if (pageMenuEl && !pageMenuEl.contains(e.target)) closePageMenu(); }
+    function onPageMenuKey(e) { if (e.key === "Escape") { e.preventDefault(); closePageMenu(); } }
+    function openPageMenu(e, i) {
+      e.preventDefault();
+      const x = e.clientX, y = e.clientY, last = ev.pages.length - 1;
+      pageIdx = i; redrawTabs(); redrawPage();   // right-click selects the tab first
+      closePageMenu();
+      const menu = h("div", { class: "menu-drop" });
+      const item = (label, on, fn) => menu.appendChild(h("div", {
+        class: "menu-item" + (on ? "" : " disabled"),
+        onclick() { if (!on) return; closePageMenu(); fn(); },
+      }, h("span", { class: "mi-label" }, label)));
+      const sep = () => menu.appendChild(h("div", { class: "menu-sep" }));
+      item("Add page", true, () => addPageAt(i + 1));   // to the right, like Paste
+      item("Rename", true, () => startRename(i));
+      item("Move left", i > 0, () => movePage(i, -1));
+      item("Move right", i < last, () => movePage(i, 1));
+      sep();
+      item("Copy", true, () => copyPage(i));
+      item("Paste", !!clipPage, () => pastePage(i));
+      item("Delete", ev.pages.length > 1, () => deletePage(i));
+      document.body.appendChild(menu);
+      menu.style.left = Math.max(4, Math.min(x, window.innerWidth - menu.offsetWidth - 4)) + "px";
+      menu.style.top = Math.max(4, Math.min(y, window.innerHeight - menu.offsetHeight - 4)) + "px";
+      pageMenuEl = menu;
+      document.addEventListener("mousedown", onPageMenuOutside, true);
+      document.addEventListener("keydown", onPageMenuKey, true);
+    }
+    function clearTabDrops() { tabs.querySelectorAll(".drop-left, .drop-right").forEach((b) => b.classList.remove("drop-left", "drop-right")); }
     function redrawTabs() {
       tabs.innerHTML = "";
       ev.pages.forEach((_, i) => {
-        tabs.appendChild(h("button", { class: i === pageIdx ? "sel" : "", onclick() { pageIdx = i; redrawTabs(); redrawPage(); } }, "Page " + (i + 1)));
+        if (editingPage === i) {                  // inline rename: an input replaces the tab button
+          const inp = h("input", { class: "tab-rename", value: ev.pages[i].name || "",
+            onkeydown(e) {
+              if (e.key === "Enter") { e.preventDefault(); commitRename(i, inp.value); }
+              else if (e.key === "Escape") { e.preventDefault(); editingPage = null; redrawTabs(); }
+            },
+            onblur() { if (editingPage === i) commitRename(i, inp.value); },
+          });
+          tabs.appendChild(inp);
+          setTimeout(() => { inp.focus(); inp.select(); }, 0);
+          return;
+        }
+        const btn = h("button", {
+          class: i === pageIdx ? "sel" : "",
+          onclick() { pageIdx = i; redrawTabs(); redrawPage(); },
+          ondblclick() { startRename(i); },
+          oncontextmenu(e) { openPageMenu(e, i); },
+        }, ev.pages[i].name || ("Page " + (i + 1)));
+        btn.draggable = true;
+        btn.addEventListener("dragstart", (e) => { dragPageFrom = i; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", "page"); btn.classList.add("dragging"); });
+        btn.addEventListener("dragend", () => { btn.classList.remove("dragging"); clearTabDrops(); dragPageFrom = null; });
+        btn.addEventListener("dragover", (e) => {
+          if (dragPageFrom === null || dragPageFrom === i) return;
+          e.preventDefault(); e.dataTransfer.dropEffect = "move"; clearTabDrops();
+          const r = btn.getBoundingClientRect();
+          btn.classList.add(e.clientX - r.left < r.width / 2 ? "drop-left" : "drop-right");
+        });
+        btn.addEventListener("dragleave", () => btn.classList.remove("drop-left", "drop-right"));
+        btn.addEventListener("drop", (e) => {
+          if (dragPageFrom === null || dragPageFrom === i) return;
+          e.preventDefault();
+          const r = btn.getBoundingClientRect();
+          let to = e.clientX - r.left < r.width / 2 ? i : i + 1;
+          const from = dragPageFrom; dragPageFrom = null; clearTabDrops();
+          if (from < to) to--;                   // the removed page shifts later indices down
+          ev.pages.splice(to, 0, ev.pages.splice(from, 1)[0]);
+          pageIdx = to; redrawTabs(); redrawPage();
+        });
+        tabs.appendChild(btn);
       });
-      tabs.appendChild(h("button", { class: "mini", onclick() { ev.pages.push(DataDefaults.newPage()); pageIdx = ev.pages.length - 1; redrawTabs(); redrawPage(); } }, "+"));
-      tabs.appendChild(h("button", { class: "mini", onclick() {
-        if (ev.pages.length <= 1) return;
-        ev.pages.splice(pageIdx, 1);
-        pageIdx = Math.min(pageIdx, ev.pages.length - 1);
-        redrawTabs(); redrawPage();
-      } }, "−"));
+      tabs.appendChild(h("button", { class: "mini", title: "Add a page", onclick() { ev.pages.push(DataDefaults.newPage()); pageIdx = ev.pages.length - 1; redrawTabs(); redrawPage(); } }, "+"));
+      tabs.appendChild(h("button", { class: "mini", title: "Delete this page", onclick() { deletePage(pageIdx); } }, "−"));
     }
     function redrawPage() {
       const pg = ev.pages[pageIdx];
@@ -2833,7 +3275,28 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
         row(field("Switch ON", sel(pg.cond, "switchId", switchOpts())),
           field("Variable ≥", sel(pg.cond, "varId", varOpts())), field("…value", nIn(pg.cond, "varVal")),
           field("Self-Switch ON", sel(pg.cond, "selfSw", [{ v: "", l: "(none)" }, { v: "A", l: "A" }, { v: "B", l: "B" }, { v: "C", l: "C" }, { v: "D", l: "D" }]))),
+        row(field("Quest", sel(pg.cond, "questId", dbOpts(proj.quests, "(none)"))),
+          field("Status", sel(pg.cond, "questStatus", stringSelOpts(["inactive", "active", "completed", "failed", "abandoned"])))),
       );
+      const objectiveRow = h("div", { class: "frow" });
+      function redrawObjectiveCond() {
+        objectiveRow.innerHTML = "";
+        const questWrap = h("span");
+        const objWrap = h("span");
+        const redrawObjectiveList = () => {
+          const q = RA.byId(proj.quests, pg.cond.objectiveQuestId);
+          const opts = [{ v: 0, l: "(none)" }].concat(((q && q.objectives) || []).map((obj, i) => ({ v: i, l: (i + 1) + ": " + (obj.label || obj.kind || "Objective") })));
+          objWrap.innerHTML = "";
+          objWrap.appendChild(sel(pg.cond, "objectiveIndex", opts));
+        };
+        questWrap.appendChild(sel(pg.cond, "objectiveQuestId", dbOpts(proj.quests, "(none)"), redrawObjectiveList));
+        redrawObjectiveList();
+        objectiveRow.appendChild(field("Objective Quest", questWrap));
+        objectiveRow.appendChild(field("Objective", objWrap));
+        objectiveRow.appendChild(field("Objective is", sel(pg.cond, "objectiveStatus", stringSelOpts(["incomplete", "completed"]))));
+      }
+      redrawObjectiveCond();
+      condBox.appendChild(objectiveRow);
       // appearance / behaviour
       const preview = h("span", { class: "char-preview" });
       function redrawPreview() {
@@ -2854,7 +3317,7 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
       redrawPreview();
       pageBox.appendChild(condBox);
       pageBox.appendChild(appBox);
-      const cw = cmdListWidget(() => ev.pages[pageIdx].commands);
+      const cw = cmdListWidget(() => ev.pages[pageIdx].commands, undoApi);
       pageBox.appendChild(h("div", { class: "subhead" }, "Commands"));
       pageBox.appendChild(cw.el);
     }
@@ -2865,11 +3328,12 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
     head.appendChild(pageBox);
     redrawTabs(); redrawPage();
 
-    modal({
+    const evModal = modal({
       title: "Event — " + esc(evOriginal.name),
       content: head,
       wide: true,
       dismissable: false,
+      onClose() { closePageMenu(); document.removeEventListener("keydown", onEvKey); },
       buttons: [
         { label: "OK", primary: true, onClick(close) {
           pushUndo();
@@ -2888,6 +3352,7 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
         { label: "Cancel" },
       ],
     });
+    evOverlay = evModal.el.parentElement;
   }
 
   // ============================ database ============================
@@ -2934,9 +3399,29 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
         spec.list().push(e);
         cur = e; touch(); redrawList(); redrawForm();
       } }, "+ New"),
+      ...(spec.reorderable ? [
+        h("button", { class: "mini", title: "Move earlier", onclick() {
+          if (!cur) return;
+          const arr = spec.list();
+          const i = arr.indexOf(cur);
+          if (i <= 0) return;
+          const [moved] = arr.splice(i, 1);
+          arr.splice(i - 1, 0, moved);
+          touch(); redrawList(); redrawForm();
+        } }, "↑"),
+        h("button", { class: "mini", title: "Move later", onclick() {
+          if (!cur) return;
+          const arr = spec.list();
+          const i = arr.indexOf(cur);
+          if (i < 0 || i >= arr.length - 1) return;
+          const [moved] = arr.splice(i, 1);
+          arr.splice(i + 1, 0, moved);
+          touch(); redrawList(); redrawForm();
+        } }, "↓"),
+      ] : []),
       h("button", { onclick() {
         if (!cur) return;
-        if (spec.list().length <= 1) { alert("Keep at least one entry."); return; }
+        if (spec.allowEmpty !== true && spec.list().length <= 1) { alert("Keep at least one entry."); return; }
         confirmBox("Delete \"" + cur.name + "\"?", () => {
           const arr = spec.list();
           arr.splice(arr.indexOf(cur), 1);
@@ -3306,6 +3791,277 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
           redrawM();
           box.appendChild(h("div", { class: "subhead" }, "Members (up to 4)"));
           box.appendChild(mbox);
+        },
+      }) },
+      { label: "Quests", build: () => listFormTab({
+        list: () => proj.quests,
+        allowEmpty: true,
+        reorderable: true,
+        blank: () => ({
+          id: 0,
+          name: "Quest",
+          shortDesc: "",
+          desc: "",
+          category: "side",
+          visible: true,
+          objectives: [],
+          startReqs: [],
+          failConditions: [],
+          rewards: [],
+          failEffects: [],
+          failText: "",
+          nextQuestIds: [],
+          autoStartNext: false,
+          allowRestartOnFail: false,
+          canAbandon: false,
+        }),
+        form(e, box, redrawList) {
+          if (!e.name) e.name = "Quest";
+          if (e.shortDesc == null) e.shortDesc = "";
+          if (e.desc == null) e.desc = "";
+          if (!Array.isArray(e.objectives)) e.objectives = [];
+          if (!Array.isArray(e.rewards)) e.rewards = [];
+          if (!Array.isArray(e.startReqs)) e.startReqs = [];
+          if (!Array.isArray(e.failConditions)) e.failConditions = [];
+          if (!Array.isArray(e.failEffects)) e.failEffects = [];
+          if (!Array.isArray(e.nextQuestIds)) e.nextQuestIds = [];
+          if (!e.category) e.category = "side";
+          if (e.visible == null) e.visible = true;
+          if (e.autoStartNext == null) e.autoStartNext = false;
+          if (e.failText == null) e.failText = "";
+          if (e.allowRestartOnFail == null) e.allowRestartOnFail = false;
+          if (e.canAbandon == null) e.canAbandon = false;
+
+          function effectEditor(list, title, addLabel, blank, kinds) {
+            const panel = h("div", { class: "minilist" });
+            function redraw() {
+              panel.innerHTML = "";
+              list.forEach((rw, i) => {
+                if (!rw.kind) rw.kind = kinds[0].v;
+                const rowEl = h("div", { class: "minirow" });
+                rowEl.appendChild(sel(rw, "kind", kinds, redraw));
+                if (rw.kind === "item") {
+                  if (!rw.itemKind) rw.itemKind = "item";
+                  const entryWrap = h("span");
+                  const redrawEntry = () => {
+                    const arr = rw.itemKind === "weapon" ? proj.weapons : rw.itemKind === "armor" ? proj.armors : proj.items;
+                    if (!arr.some((it) => it.id === Number(rw.id))) rw.id = arr[0] ? arr[0].id : 0;
+                    entryWrap.innerHTML = "";
+                    entryWrap.appendChild(sel(rw, "id", dbOpts(arr, "(none)")));
+                  };
+                  rowEl.appendChild(sel(rw, "itemKind", [
+                    { v: "item", l: "Item" },
+                    { v: "weapon", l: "Weapon" },
+                    { v: "armor", l: "Armor" },
+                  ], redrawEntry));
+                  redrawEntry();
+                  rowEl.appendChild(entryWrap);
+                  rowEl.appendChild(nIn(rw, "count", 1, 99));
+                } else if (rw.kind === "switch") {
+                  rowEl.appendChild(sel(rw, "id", switchOpts()));
+                  rowEl.appendChild(sel(rw, "val", [{ v: "true", l: "ON" }, { v: "false", l: "OFF" }]));
+                } else if (rw.kind === "var") {
+                  rowEl.appendChild(sel(rw, "id", varOpts()));
+                  rowEl.appendChild(sel(rw, "op", [{ v: "set", l: "Set" }, { v: "add", l: "Add" }, { v: "sub", l: "Sub" }]));
+                  rowEl.appendChild(nIn(rw, "amount", -9999999, 9999999));
+                } else if (rw.kind === "questUnlock" || rw.kind === "questLock") {
+                  rowEl.appendChild(sel(rw, "questId", dbOpts(proj.quests, "(none)")));
+                } else {
+                  rowEl.appendChild(nIn(rw, "amount", 0, 9999999));
+                }
+                rowEl.appendChild(h("button", { class: "mini", onclick() { list.splice(i, 1); touch(); redraw(); } }, "✕"));
+                panel.appendChild(rowEl);
+              });
+              panel.appendChild(h("button", { class: "mini", onclick() {
+                list.push(blank());
+                touch(); redraw();
+              } }, addLabel));
+            }
+            redraw();
+            box.appendChild(h("div", { class: "subhead" }, title));
+            box.appendChild(panel);
+          }
+          function failConditionEditor() {
+            const panel = h("div", { class: "minilist" });
+            function redraw() {
+              panel.innerHTML = "";
+              e.failConditions.forEach((fc, i) => {
+                if (!fc.kind) fc.kind = "manual";
+                const rowEl = h("div", { class: "minirow", style: "align-items:flex-start; flex-wrap:wrap" });
+                rowEl.appendChild(field("Type", sel(fc, "kind", stringSelOpts(["manual", "switch", "var", "battleLose", "enemyDefeatCount"]), redraw)));
+                if (fc.kind === "switch") {
+                  rowEl.appendChild(field("Switch", sel(fc, "id", switchOpts())));
+                  rowEl.appendChild(field("State", sel(fc, "val", [{ v: "true", l: "ON" }, { v: "false", l: "OFF" }])));
+                } else if (fc.kind === "var") {
+                  rowEl.appendChild(field("Variable", sel(fc, "id", varOpts())));
+                  rowEl.appendChild(field("Cmp", sel(fc, "cmp", [{ v: ">=", l: "≥" }, { v: "==", l: "=" }, { v: "<=", l: "≤" }])));
+                  rowEl.appendChild(field("Value", nIn(fc, "val", -9999999, 9999999)));
+                } else if (fc.kind === "battleLose") {
+                  rowEl.appendChild(field("Troop", sel(fc, "troopId", dbOpts(proj.troops, "(none)"))));
+                } else if (fc.kind === "enemyDefeatCount") {
+                  rowEl.appendChild(field("Enemy", sel(fc, "enemyId", dbOpts(proj.enemies, "(none)"))));
+                  rowEl.appendChild(field("Losses", nIn(fc, "count", 1, 99)));
+                } else {
+                  rowEl.appendChild(h("div", { class: "dim" }, "Manual fail only — use the Fail Quest command."));
+                }
+                rowEl.appendChild(h("button", { class: "mini", onclick() { e.failConditions.splice(i, 1); touch(); redraw(); } }, "✕"));
+                panel.appendChild(rowEl);
+              });
+              panel.appendChild(h("button", { class: "mini", onclick() {
+                e.failConditions.push({ kind: "manual" });
+                touch(); redraw();
+              } }, "+ add fail condition"));
+            }
+            redraw();
+            box.appendChild(h("div", { class: "subhead" }, "Fail conditions"));
+            box.appendChild(panel);
+          }
+
+          function requirementEditor() {
+            const panel = h("div", { class: "minilist" });
+            function redraw() {
+              panel.innerHTML = "";
+              e.startReqs.forEach((rq, i) => {
+                if (!rq.kind) rq.kind = "quest";
+                const rowEl = h("div", { class: "minirow" });
+                rowEl.appendChild(sel(rq, "kind", [
+                  { v: "quest", l: "Quest state" },
+                  { v: "switch", l: "Switch" },
+                  { v: "var", l: "Variable" },
+                ], redraw));
+                if (rq.kind === "quest") {
+                  const questOpts = [{ v: 0, l: "(none)" }].concat(proj.quests.filter((q) => q !== e).map((q) => ({ v: q.id, l: q.id + ": " + (q.name || "Quest") })));
+                  rowEl.appendChild(sel(rq, "questId", questOpts));
+                  rowEl.appendChild(sel(rq, "status", stringSelOpts(["active", "completed", "failed", "abandoned"])));
+                } else if (rq.kind === "switch") {
+                  rowEl.appendChild(sel(rq, "id", switchOpts()));
+                  rowEl.appendChild(sel(rq, "val", [{ v: "true", l: "ON" }, { v: "false", l: "OFF" }]));
+                } else {
+                  rowEl.appendChild(sel(rq, "id", varOpts()));
+                  rowEl.appendChild(sel(rq, "cmp", [{ v: ">=", l: "≥" }, { v: "==", l: "=" }, { v: "<=", l: "≤" }]));
+                  rowEl.appendChild(nIn(rq, "val", -9999999, 9999999));
+                }
+                rowEl.appendChild(h("button", { class: "mini", onclick() { e.startReqs.splice(i, 1); touch(); redraw(); } }, "✕"));
+                panel.appendChild(rowEl);
+              });
+              panel.appendChild(h("button", { class: "mini", onclick() {
+                e.startReqs.push({ kind: "quest", questId: 0, status: "completed" });
+                touch(); redraw();
+              } }, "+ add requirement"));
+            }
+            redraw();
+            box.appendChild(h("div", { class: "subhead" }, "Availability / start requirements"));
+            box.appendChild(panel);
+          }
+          function objectiveEditor() {
+            const panel = h("div", { class: "minilist" });
+            function redraw() {
+              panel.innerHTML = "";
+              e.objectives.forEach((obj, i) => {
+                if (!obj.kind) obj.kind = "event";
+                if (!obj.label) obj.label = "";
+                if (obj.count == null) obj.count = 1;
+                const rowEl = h("div", { class: "minirow", style: "align-items:flex-start; flex-wrap:wrap" });
+                rowEl.appendChild(field("Type", sel(obj, "kind", stringSelOpts(["event", "kill", "fetch"]), redraw)));
+                rowEl.appendChild(field("Label", tIn(obj, "label")));
+                rowEl.appendChild(field("Count", nIn(obj, "count", 1, 999)));
+                if (obj.kind === "kill") {
+                  rowEl.appendChild(field("Enemy", sel(obj, "enemyId", dbOpts(proj.enemies, "(none)"))));
+                } else if (obj.kind === "fetch") {
+                  const itemWrap = h("span");
+                  const eventWrap = h("span");
+                  const redrawItem = () => {
+                    const arr = obj.itemKind === "weapon" ? proj.weapons : obj.itemKind === "armor" ? proj.armors : proj.items;
+                    if (!arr.some((it) => it.id === Number(obj.id))) obj.id = arr[0] ? arr[0].id : 0;
+                    itemWrap.innerHTML = "";
+                    itemWrap.appendChild(sel(obj, "id", dbOpts(arr, "(none)")));
+                  };
+                  const redrawEvent = () => {
+                    const map = RA.byId(proj.maps, obj.targetMapId);
+                    const eventOpts = [{ v: 0, l: "(any)" }].concat((map || { events: [] }).events.map((ev2) => ({ v: ev2.id, l: ev2.id + ": " + ev2.name })));
+                    eventWrap.innerHTML = "";
+                    eventWrap.appendChild(sel(obj, "targetEventId", eventOpts));
+                  };
+                  if (!obj.itemKind) obj.itemKind = "item";
+                  rowEl.appendChild(field("Kind", sel(obj, "itemKind", [
+                    { v: "item", l: "Item" },
+                    { v: "weapon", l: "Weapon" },
+                    { v: "armor", l: "Armor" },
+                  ], redrawItem)));
+                  redrawItem();
+                  rowEl.appendChild(field("Entry", itemWrap));
+                  rowEl.appendChild(field("Turn-in map", sel(obj, "targetMapId", dbOpts(proj.maps, "(any)"), redrawEvent)));
+                  redrawEvent();
+                  rowEl.appendChild(field("Turn-in event", eventWrap));
+                  rowEl.appendChild(field("Consume on complete", chk(obj, "consumeOnComplete")));
+                }
+                rowEl.appendChild(h("button", { class: "mini", onclick() { e.objectives.splice(i, 1); touch(); redraw(); } }, "✕"));
+                panel.appendChild(rowEl);
+              });
+              panel.appendChild(h("div", { class: "minirow" },
+                h("button", { class: "mini", onclick() { e.objectives.push({ kind: "event", label: "Talk to target", count: 1 }); touch(); redraw(); } }, "+ Event objective"),
+                h("button", { class: "mini", onclick() { e.objectives.push({ kind: "kill", label: "Defeat target enemies", enemyId: proj.enemies[0] ? proj.enemies[0].id : 0, count: 3 }); touch(); redraw(); } }, "+ Kill objective"),
+                h("button", { class: "mini", onclick() { e.objectives.push({ kind: "fetch", label: "Bring requested item", itemKind: "item", id: proj.items[0] ? proj.items[0].id : 0, count: 1, targetMapId: 0, targetEventId: 0, consumeOnComplete: false }); touch(); redraw(); } }, "+ Fetch objective")));
+            }
+            redraw();
+            box.appendChild(h("div", { class: "subhead" }, "Objectives"));
+            box.appendChild(panel);
+          }
+
+          box.appendChild(row(field("Title", nameRefresher(e, redrawList)),
+            field("Category", sel(e, "category", stringSelOpts(["main", "side", "guild", "hidden"]))),
+            field("Visible in journal", chk(e, "visible"))));
+          const shortDesc = h("input", { type: "text", value: e.shortDesc || "", oninput(ev) { e.shortDesc = ev.target.value; touch(); } });
+          const desc = h("textarea", { rows: 5, oninput(ev) { e.desc = ev.target.value; touch(); } }, e.desc || "");
+          box.appendChild(field("Short description", shortDesc));
+          box.appendChild(field("Long description", desc));
+
+          objectiveEditor();
+          requirementEditor();
+          failConditionEditor();
+
+          effectEditor(e.rewards, "Rewards", "+ add reward", () => ({ kind: "gold", amount: 100 }), [
+            { v: "exp", l: "XP" },
+            { v: "gold", l: "Money" },
+            { v: "item", l: "Item" },
+          ]);
+
+          effectEditor(e.failEffects, "Fail effects", "+ add fail effect", () => ({ kind: "switch", id: 1, val: "true" }), [
+            { v: "gold", l: "Money" },
+            { v: "item", l: "Item" },
+            { v: "switch", l: "Switch" },
+            { v: "var", l: "Variable" },
+            { v: "questUnlock", l: "Unlock quest" },
+            { v: "questLock", l: "Lock quest" },
+          ]);
+          box.appendChild(field("Failure / consequence text", h("textarea", { rows: 3, oninput(ev) { e.failText = ev.target.value; touch(); } }, e.failText || "")));
+
+          const nextBox = h("div", { class: "minilist" });
+          function redrawNext() {
+            nextBox.innerHTML = "";
+            e.nextQuestIds.forEach((id, i) => {
+              const slot = { id };
+              const options = [{ v: 0, l: "(none)" }].concat(proj.quests.filter((q) => q !== e).map((q) => ({ v: q.id, l: q.id + ": " + (q.name || "Quest") })));
+              nextBox.appendChild(h("div", { class: "minirow" },
+                sel(slot, "id", options, () => {
+                  e.nextQuestIds[i] = slot.id;
+                  e.nextQuestIds = e.nextQuestIds.filter((qid) => qid && qid !== e.id);
+                  touch();
+                }),
+                h("button", { class: "mini", onclick() { e.nextQuestIds.splice(i, 1); touch(); redrawNext(); } }, "✕")));
+            });
+            nextBox.appendChild(h("button", { class: "mini", onclick() {
+              const candidate = proj.quests.find((q) => q !== e && !e.nextQuestIds.includes(q.id));
+              if (!candidate) return;
+              e.nextQuestIds.push(candidate.id);
+              touch(); redrawNext();
+            } }, "+ add next quest"));
+          }
+          redrawNext();
+          box.appendChild(h("div", { class: "subhead" }, "Next quests"));
+          box.appendChild(nextBox);
+          box.appendChild(field("Auto-start next quests", chk(e, "autoStartNext")));
+          box.appendChild(row(field("Allow restart after fail", chk(e, "allowRestartOnFail")), field("Player can abandon", chk(e, "canAbandon"))));
         },
       }) },
       { label: "States", build: () => listFormTab({
@@ -3849,6 +4605,38 @@ atlas.onMapLoad((map) => {
   }
 
   // ============================ help / about ============================
+  function refreshLocalizedChrome() {
+    editorI18n.localizeStatic();
+    buildMenubar();
+    buildToolbar();
+    refreshToolbar();
+    setStatus();
+    const saveIndicator = $("save-ind");
+    if (saveIndicator.textContent.startsWith("●")) saveIndicator.textContent = "● " + t("unsaved");
+    else if (saveIndicator.textContent.startsWith("⚠")) saveIndicator.textContent = "⚠ " + t("save failed");
+    else saveIndicator.textContent = "✓ " + t("saved");
+  }
+  function openLanguageSettings() {
+    let selectedLocale = editorI18n.locale;
+    const languageSelect = h("select", {
+      onchange(e) { selectedLocale = e.target.value; },
+    }, ...editorI18n.locales().map((locale) =>
+      h("option", { value: locale.id, ...(locale.id === selectedLocale ? { selected: "" } : {}) }, locale.label)));
+    modal({
+      title: "Interface Language",
+      content: h("div", null,
+        h("p", null, t("Choose the language used by the editor. Project content is not translated.")),
+        field("Language", languageSelect)),
+      buttons: [
+        { label: "Apply", primary: true, onClick(close) {
+          editorI18n.setLocale(selectedLocale);
+          close();
+          refreshLocalizedChrome();
+        } },
+        { label: "Cancel" },
+      ],
+    });
+  }
   function openPatchNotes() {
     const list = h("div", { class: "patch-notes" });
     PATCH_NOTES.forEach((note) => {
@@ -3982,7 +4770,13 @@ atlas.onMapLoad((map) => {
 
   // ============================ actions / menus / toolbar ============================
   const ACT = {};
-  function act(id, def) { ACT[id] = def; }
+  function act(id, def) {
+    def.labelKey = def.label;
+    def.tipKey = def.tip;
+    ACT[id] = def;
+  }
+  function actionLabel(action) { return t(action.labelKey); }
+  function actionTip(action) { return t(action.tipKey || action.labelKey); }
   function runAct(id) {
     const a = ACT[id];
     if (!a || (a.enabled && !a.enabled())) return;
@@ -4002,15 +4796,22 @@ atlas.onMapLoad((map) => {
     });
   } });
   act("open", { label: "Open Project (.json)…", icon: "open", tip: "Open / import a project file", run() { $("import-file").click(); } });
-  act("save", { label: "Save Project", icon: "save", key: "Ctrl+S", tip: "Save the project to this browser now", run() {
-    saveNow();
-    flashStatus("Project saved to this browser — use File ▸ Export for a backup file");
-  } });
+  act("save", { label: "Save Project", icon: "save", key: "Ctrl+S",
+    tip: host.isTauri ? "Save the project to its file (Ctrl+S)" : "Save the project to this browser now",
+    run() {
+      if (host.isTauri) { desktopSave(false); return; }
+      saveNow();
+      flashStatus("Project saved to this browser — use File ▸ Export for a backup file");
+    } });
   act("export", { label: "Export Project As File…", run: exportProject });
   act("build", { label: "Export Standalone Game…", run: openStandaloneExport });
   act("play", { label: "Playtest", icon: "play", tip: "Save and run the game", run() {
     saveNow();
-    window.open("play.html", "rpgatlas_play");
+    if (host.isTauri) {
+      host.openPlaytest().catch((e) => alert("Could not open play-test window: " + e.message));
+    } else {
+      window.open("play.html", "rpgatlas_play");
+    }
   } });
   act("mapprops", { label: "Map Properties…", run: openMapProps });
   act("hdpreview", { label: "HD-2D Preview", icon: "hd2d", tip: "Toggle the live HD-2D preview panel (uses this map's HD-2D settings)", active: () => !!hdPanel, run: toggleHdPreview });
@@ -4065,6 +4866,7 @@ atlas.onMapLoad((map) => {
   act("search", { label: "Event Searcher…", icon: "search", tip: "Event Searcher — find text / switches / variables across maps", run: openEventSearcher });
   act("resources", { label: "Resource Manager…", icon: "resources", tip: "Resource Manager — browse and export generated assets", run: openResourceManager });
   act("chargen", { label: "Character Generator…", icon: "chargen", tip: "Character Generator — build original walking sprites", run: openCharGenerator });
+  act("language", { label: "Interface Language…", run: openLanguageSettings });
   act("patchnotes", { label: "Patch Notes", run: openPatchNotes });
   act("help", { label: "Quick Help", run: openHelp });
   act("about", { label: "About RPGAtlas", run: openAbout });
@@ -4089,11 +4891,11 @@ atlas.onMapLoad((map) => {
         const a = ACT[id];
         const btn = h("button", {
           class: "tbtn" + (id === "play" ? " play-btn" : ""),
-          title: (a.tip || a.label) + (a.key ? "  (" + a.key + ")" : ""),
+          title: actionTip(a) + (a.key ? "  (" + a.key + ")" : ""),
           onclick: () => runAct(id),
         });
         btn.innerHTML = ICONS[a.icon] || "";
-        if (id === "play") btn.appendChild(document.createTextNode("Playtest"));
+        if (id === "play") btn.appendChild(document.createTextNode(actionLabel(a)));
         a.btn = btn;
         bar.appendChild(btn);
       }
@@ -4117,9 +4919,10 @@ atlas.onMapLoad((map) => {
     { label: "Scale", items: ["zoomin", "zoomout", "zoom1", "zoomfit"] },
     { label: "Tools", items: ["db", "plugins", "audio", "search", "resources", "chargen"] },
     { label: "Game", items: ["play", "build", "-", "mapprops", "hdpreview", "mode-start"] },
-    { label: "Help", items: ["patchnotes", "help", "about"] },
+    { label: "Help", items: ["language", "-", "patchnotes", "help", "about"] },
   ];
   let menuOpenRef = null;
+  let menuDismissBound = false;
   function closeMenus() {
     if (!menuOpenRef) return;
     menuOpenRef.drop.remove();
@@ -4138,7 +4941,7 @@ atlas.onMapLoad((map) => {
         onclick() { if (dis) return; closeMenus(); a.run(); refreshToolbar(); },
       },
         h("span", { class: "mi-check" }, a.active && a.active() ? "✓" : ""),
-        h("span", { class: "mi-label" }, a.label),
+        h("span", { class: "mi-label" }, actionLabel(a)),
         a.key ? h("span", { class: "mi-key" }, a.key) : null));
     }
     const r = lab.getBoundingClientRect();
@@ -4152,7 +4955,7 @@ atlas.onMapLoad((map) => {
     const nav = $("menus");
     nav.innerHTML = "";
     for (const menu of MENUS) {
-      const lab = h("span", { class: "menu-label" }, menu.label);
+      const lab = h("span", { class: "menu-label" }, t(menu.label));
       lab.addEventListener("mousedown", (e) => {
         e.preventDefault(); e.stopPropagation();
         if (menuOpenRef && menuOpenRef.lab === lab) closeMenus();
@@ -4163,9 +4966,12 @@ atlas.onMapLoad((map) => {
       });
       nav.appendChild(lab);
     }
-    document.addEventListener("mousedown", (e) => {
-      if (menuOpenRef && !menuOpenRef.drop.contains(e.target)) closeMenus();
-    });
+    if (!menuDismissBound) {
+      document.addEventListener("mousedown", (e) => {
+        if (menuOpenRef && !menuOpenRef.drop.contains(e.target)) closeMenus();
+      });
+      menuDismissBound = true;
+    }
   }
 
   // ============================ modes / zoom ============================
@@ -4229,6 +5035,7 @@ atlas.onMapLoad((map) => {
     mapCtx = mapCanvas.getContext("2d");
     palCanvas = $("palette");
 
+    editorI18n.localizeStatic();
     buildMenubar();
     buildToolbar();
 
