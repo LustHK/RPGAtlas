@@ -9,6 +9,30 @@ const Assets = (() => {
   const external = { characters: [], facesets: [], enemies: [], tilesets: [] };
   const externalByKey = new Map();
   const faceByName = new Map();
+  // MZ tileset specs: keyed by category suffix (A1–A5, B–E)
+  const MZ_TILESET_SPECS = {
+    A1: { cols: 16, rows: 12, w: 768, h: 576, passDefault: false, terrain: false,
+          kindCols: 5, kindRows: 1, kindW: 3, kindH: 4, autotile: "animated", desc: "Animated autotiles" },
+    A2: { cols: 16, rows: 12, w: 768, h: 576, passDefault: true,  terrain: true,
+          kindCols: 8, kindRows: 4, kindW: 2, kindH: 3, autotile: "floor",    desc: "Ground autotiles" },
+    A3: { cols: 16, rows: 8,  w: 768, h: 384, passDefault: false, terrain: false,
+          kindCols: 8, kindRows: 4, kindW: 2, kindH: 2, autotile: "group",    desc: "Building autotiles" },
+    A4: { cols: 16, rows: 15, w: 768, h: 720, passDefault: true,  terrain: true,
+          kindCols: 8, kindRows: 3, kindW: 2, kindH: 5, autotile: "wall",     desc: "Wall autotiles" },
+    A5: { cols: 8,  rows: 16, w: 384, h: 768, passDefault: true,  terrain: true,
+          kindCols: 8, kindRows: 16, kindW: 1, kindH: 1, autotile: false,      desc: "Normal tiles" },
+    B:  { cols: 16, rows: 16, w: 768, h: 768, passDefault: false, terrain: false,
+          kindCols: 16, kindRows: 16, kindW: 1, kindH: 1, autotile: false,      desc: "Object tiles" },
+    C:  { cols: 16, rows: 16, w: 768, h: 768, passDefault: false, terrain: false,
+          kindCols: 16, kindRows: 16, kindW: 1, kindH: 1, autotile: false,      desc: "Object tiles" },
+    D:  { cols: 16, rows: 16, w: 768, h: 768, passDefault: false, terrain: false,
+          kindCols: 16, kindRows: 16, kindW: 1, kindH: 1, autotile: false,      desc: "Object tiles" },
+    E:  { cols: 16, rows: 16, w: 768, h: 768, passDefault: false, terrain: false,
+          kindCols: 16, kindRows: 16, kindW: 1, kindH: 1, autotile: false,      desc: "Object tiles" },
+  };
+  // MZ tileset name pattern: TileA1.png, TileA2.png, ..., Shop_Outside_TileA2.png, etc.
+  const MZ_TILESET_RE = /^(?:.+_)?Tile(A[1-5]|[B-E])\.png$/i;
+  const tilesets = {}; // Assets.tilesets registry (populated at runtime)
   const ICON_SIZE = 32;
   const ICON_COLS = 8;
   const ICON_COUNT = 64;
@@ -140,6 +164,160 @@ const Assets = (() => {
       } catch (e) { console.warn(e.message); }
     }
     return ready;
+  }
+
+  // ---------- autotile system (Phase 3) ----------
+  const Q = TILE >> 1; // quarter size = 24
+  // Official quarter lookup tables from RMMZ Tilemap.js
+  // prettier-ignore
+  const FLOOR_AUTOTILE_TABLE = [
+    [[2,4],[1,4],[2,3],[1,3]], [[2,0],[1,4],[2,3],[1,3]], [[2,4],[3,0],[2,3],[1,3]], [[2,0],[3,0],[2,3],[1,3]],
+    [[2,4],[1,4],[2,3],[3,1]], [[2,0],[1,4],[2,3],[3,1]], [[2,4],[3,0],[2,3],[3,1]], [[2,0],[3,0],[2,3],[3,1]],
+    [[2,4],[1,4],[2,1],[1,3]], [[2,0],[1,4],[2,1],[1,3]], [[2,4],[3,0],[2,1],[1,3]], [[2,0],[3,0],[2,1],[1,3]],
+    [[2,4],[1,4],[2,1],[3,1]], [[2,0],[1,4],[2,1],[3,1]], [[2,4],[3,0],[2,1],[3,1]], [[2,0],[3,0],[2,1],[3,1]],
+    [[0,4],[1,4],[0,3],[1,3]], [[0,4],[3,0],[0,3],[1,3]], [[0,4],[1,4],[0,3],[3,1]], [[0,4],[3,0],[0,3],[3,1]],
+    [[2,2],[1,2],[2,3],[1,3]], [[2,2],[1,2],[2,3],[3,1]], [[2,2],[1,2],[2,1],[1,3]], [[2,2],[1,2],[2,1],[3,1]],
+    [[2,4],[3,4],[2,3],[3,3]], [[2,4],[3,4],[2,1],[3,3]], [[2,0],[3,4],[2,3],[3,3]], [[2,0],[3,4],[2,1],[3,3]],
+    [[2,4],[1,4],[2,5],[1,5]], [[2,0],[1,4],[2,5],[1,5]], [[2,4],[3,0],[2,5],[1,5]], [[2,0],[3,0],[2,5],[1,5]],
+    [[0,4],[3,4],[0,3],[3,3]], [[2,2],[1,2],[2,5],[1,5]], [[0,2],[1,2],[0,3],[1,3]], [[0,2],[1,2],[0,3],[3,1]],
+    [[2,2],[3,2],[2,3],[3,3]], [[2,2],[3,2],[2,1],[3,3]], [[2,4],[3,4],[2,5],[3,5]], [[2,0],[3,4],[2,5],[3,5]],
+    [[0,4],[1,4],[0,5],[1,5]], [[0,4],[3,0],[0,5],[1,5]], [[0,2],[3,2],[0,3],[3,3]], [[0,2],[1,2],[0,5],[1,5]],
+    [[0,4],[3,4],[0,5],[3,5]], [[2,2],[3,2],[2,5],[3,5]], [[0,2],[3,2],[0,5],[3,5]], [[0,0],[1,0],[0,1],[1,1]],
+  ];
+  const WALL_AUTOTILE_TABLE = [
+    [[2,2],[1,2],[2,1],[1,1]], [[0,2],[1,2],[0,1],[1,1]], [[2,0],[1,0],[2,1],[1,1]], [[0,0],[1,0],[0,1],[1,1]],
+    [[2,2],[3,2],[2,1],[3,1]], [[0,2],[3,2],[0,1],[3,1]], [[2,0],[3,0],[2,1],[3,1]], [[0,0],[3,0],[0,1],[3,1]],
+    [[2,2],[1,2],[2,3],[1,3]], [[0,2],[1,2],[0,3],[1,3]], [[2,0],[1,0],[2,3],[1,3]], [[0,0],[1,0],[0,3],[1,3]],
+    [[2,2],[3,2],[2,3],[3,3]], [[0,2],[3,2],[0,3],[3,3]], [[2,0],[3,0],[2,3],[3,3]], [[0,0],[3,0],[0,3],[3,3]],
+  ];
+  const WATERFALL_AUTOTILE_TABLE = [
+    [[2,0],[1,0],[2,1],[1,1]], [[0,0],[1,0],[0,1],[1,1]],
+    [[2,0],[3,0],[2,1],[3,1]], [[0,0],[3,0],[0,1],[3,1]],
+  ];
+
+  // Corner state constants
+  const OUTER = 0, H_EDGE = 1, V_EDGE = 2, INNER = 3, SOLID = 4;
+
+  // Floor quarter source coordinates within a kind block (qx,qy in quarter-units)
+  // Indexed by state: 0=outer,1=h_edge,2=v_edge,3=inner,4=solid
+  const FLOOR_QUARTERS = {
+    TL: [[2,4],[0,2],[2,2],[2,0],[0,0]],
+    TR: [[1,4],[1,2],[3,2],[3,0],[1,0]],
+    BL: [[2,5],[0,3],[2,3],[2,1],[0,1]],
+    BR: [[1,5],[1,3],[3,3],[3,1],[1,1]],
+  };
+
+  // Wall quarter source coordinates
+  // Indexed by state: 0=outer,1=h_edge,2=v_edge,3=solid
+  const WALL_QUARTERS = {
+    TL: [[2,2],[0,2],[2,0],[0,0]],
+    TR: [[3,2],[1,2],[3,0],[1,0]],
+    BL: [[2,1],[0,3],[2,1],[0,1]],
+    BR: [[3,1],[1,3],[3,1],[1,1]],
+  };
+
+  function solveFloorSignature(n, s, w, e, nw, ne, sw, se) {
+    nw = nw && n && w ? 1 : 0;
+    ne = ne && n && e ? 1 : 0;
+    sw = sw && s && w ? 1 : 0;
+    se = se && s && e ? 1 : 0;
+    const cs = (v, h, d) => {
+      if (v && h && d) return SOLID;
+      if (v && h) return INNER;
+      if (v) return V_EDGE;
+      if (h) return H_EDGE;
+      return OUTER;
+    };
+    return { tl: cs(n,w,nw), tr: cs(n,e,ne), bl: cs(s,w,sw), br: cs(s,e,se) };
+  }
+
+  function solveWallMask(n, s, w, e) {
+    return (n ? 8 : 0) | (s ? 4 : 0) | (w ? 2 : 0) | (e ? 1 : 0);
+  }
+
+  function composeAutotile(image, originQx, originQy, tl, tr, bl, br, isWall) {
+    const qs = isWall ? WALL_QUARTERS : FLOOR_QUARTERS;
+    const c = mkCanvas(TILE, TILE);
+    const g = c.getContext("2d");
+    g.imageSmoothingEnabled = false;
+    const corners = [
+      { state: tl, key: "TL", dx: 0, dy: 0 },
+      { state: tr, key: "TR", dx: Q, dy: 0 },
+      { state: bl, key: "BL", dx: 0, dy: Q },
+      { state: br, key: "BR", dx: Q, dy: Q },
+    ];
+    for (const { state, key, dx, dy } of corners) {
+      g.drawImage(image,
+        (originQx + qs[key][state][0]) * Q, (originQy + qs[key][state][1]) * Q, Q, Q,
+        dx, dy, Q, Q);
+    }
+    return c;
+  }
+
+  function composeFloorAutotile(image, originQx, originQy, tl, tr, bl, br) {
+    return composeAutotile(image, originQx, originQy, tl, tr, bl, br, false);
+  }
+
+  function composeWallAutotile(image, originQx, originQy, mask) {
+    const entry = WALL_AUTOTILE_TABLE[mask & 15];
+    const c = mkCanvas(TILE, TILE);
+    const g = c.getContext("2d");
+    g.imageSmoothingEnabled = false;
+    for (let i = 0; i < 4; i++) {
+      const [rqx, rqy] = entry[i];
+      const dx = (i % 2) * Q, dy = Math.floor(i / 2) * Q;
+      g.drawImage(image, (originQx + rqx) * Q, (originQy + rqy) * Q, Q, Q, dx, dy, Q, Q);
+    }
+    return c;
+  }
+
+  // Resolve A1 tile frame for animation (water / waterfall / lava)
+  // waterSurfaceIndex cycles [0,1,2,1] at 30-frame intervals
+  // waterfall cycles [0,1,2] at 30-frame intervals
+  function resolveA1Frame(kind, animFrame) {
+    const waterSurf = [0, 1, 2, 1][animFrame % 4];
+    const waterFall = animFrame % 3;
+    if (kind === 0) return { bx: waterSurf * 2, by: 0, table: null };           // ocean A
+    if (kind === 1) return { bx: waterSurf * 2, by: 3, table: null };           // deep sea B
+    if (kind === 2) return { bx: 6, by: 0, table: null };                        // decoration C
+    if (kind === 3) return { bx: 6, by: 3, table: null };                        // water D
+    if (kind % 2 === 0) return { bx: waterSurf * 2, by: 0, table: null };       // waterfall even
+    return { bx: 6, by: waterFall, table: WATERFALL_AUTOTILE_TABLE };            // waterfall odd
+  }
+
+  // Grid-free neighbor detection: check if two tile placements are adjacent
+  function placementsAdjacent(a, b, tileSize) {
+    const t = tileSize || TILE;
+    const margin = 4;
+    const ax1 = a.x, ay1 = a.y, ax2 = a.x + t, ay2 = a.y + t;
+    const bx1 = b.x, by1 = b.y, bx2 = b.x + t, by2 = b.y + t;
+    const overlapX = ax1 < bx2 + margin && ax2 > bx1 - margin;
+    const overlapY = ay1 < by2 + margin && ay2 > by1 - margin;
+    return overlapX && overlapY;
+  }
+
+  function detectNeighbors(placement, all, tileSize) {
+    const t = tileSize || TILE;
+    const cx = placement.x + t / 2, cy = placement.y + t / 2;
+    const r = t + 4;
+    const n = { n: 0, s: 0, w: 0, e: 0, nw: 0, ne: 0, sw: 0, se: 0 };
+    for (const other of all) {
+      if (other.id === placement.id) continue;
+      if (other.tileId !== placement.tileId && !(other.tileset && placement.tileset && other.tileset === placement.tileset && other.kindIndex === placement.kindIndex)) continue;
+      const ox = other.x + t / 2, oy = other.y + t / 2;
+      const dx = ox - cx, dy = oy - cy;
+      const adx = Math.abs(dx), ady = Math.abs(dy);
+      if (adx > r || ady > r) continue;
+      const dist = Math.sqrt(adx * adx + ady * ady);
+      if (dist > t * 1.6) continue;
+      if (ady < t * 0.4 && adx < t * 0.15) { if (dy < 0) n.n = 1; else n.s = 1; }
+      else if (adx < t * 0.4 && ady < t * 0.15) { if (dx < 0) n.w = 1; else n.e = 1; }
+      else if (dx < 0 && dy < 0) n.nw = 1;
+      else if (dx > 0 && dy < 0) n.ne = 1;
+      else if (dx < 0 && dy > 0) n.sw = 1;
+      else if (dx > 0 && dy > 0) n.se = 1;
+    }
+    return n;
   }
 
   // speckle texture over the whole tile
@@ -1153,31 +1331,124 @@ const Assets = (() => {
       } else if (item.type === "enemies") {
         if (!ENEMY_TYPES.includes(key)) ENEMY_TYPES.push(key);
       } else if (item.type === "tilesets") {
-        let id = project.assets.tiles[key];
-        const existingId = tiles.findIndex((t) => t && t.key === key);
-        if (id == null) {
-          id = existingId >= 0 ? existingId : nextTileId++;
-          project.assets.tiles[key] = id;
+        // --- MZ tileset sheet detection ---
+        const mzMatch = item.name.match(MZ_TILESET_RE);
+        const specKey = mzMatch ? mzMatch[1] : null; // "A2", "B", etc.
+        const spec = specKey ? MZ_TILESET_SPECS[specKey] : null;
+
+        if (spec) {
+          // ---- RPG Maker MZ multi-tile sheet ----
+          const img = item.image;
+          if (img.width !== spec.w || img.height !== spec.h) {
+            console.warn("MZ tileset " + item.name + " dimensions mismatch: expected " +
+              spec.w + "x" + spec.h + ", got " + img.width + "x" + img.height + " — skipping");
+            continue;
+          }
+          // Check if already processed (e.g., re-binding)
+          const tilesetKey = specKey; // "TileA2" etc.
+          if (tilesets[tilesetKey]) continue;
+
+          const tileIds = [];
+          const totalTiles = spec.cols * spec.rows;
+          const nameBase = specKey; // "TileA2"
+
+          for (let ty = 0; ty < spec.rows; ty++) {
+            for (let tx = 0; tx < spec.cols; tx++) {
+              const subKey = key + "/" + (ty * spec.cols + tx);
+              let tileId = project.assets.tiles[subKey];
+              if (tileId == null) {
+                tileId = nextTileId++;
+                project.assets.tiles[subKey] = tileId;
+              }
+              // kind index (which material block)
+              const kindCol = spec.kindW > 1 ? Math.floor(tx / spec.kindW) : tx;
+              const kindRow = spec.kindH > 1 ? Math.floor(ty / spec.kindH) : ty;
+              const kindIndex = kindRow * spec.kindCols + kindCol;
+              // sub-tile position within the kind (0..kindW*kindH-1)
+              const subTile = spec.kindW > 1 ? (ty % spec.kindH) * spec.kindW + (tx % spec.kindW) : 0;
+
+              const def = {
+                key: key, // parent tileset key for export tracking
+                name: nameBase + " [" + (ty * spec.cols + tx) + "]",
+                pass: spec.passDefault,
+                terrain: spec.terrain,
+                external: true,
+                tileset: tilesetKey,
+                category: specKey,
+                kindIndex: kindIndex,
+                subTile: subTile,
+                autotile: spec.autotile,
+                autotileGroup: spec.autotile ? kindIndex : null,
+                animFrames: spec.autotile === "animated" ? [] : null,
+                assetName: item.name,
+                image: img,
+                tilesetX: tx,
+                tilesetY: ty,
+                draw(g) {
+                  g.imageSmoothingEnabled = false;
+                  g.drawImage(img, tx * TILE, ty * TILE, TILE, TILE, 0, 0, TILE, TILE);
+                },
+              };
+              while (tiles.length <= tileId) tiles.push(null);
+              tiles[tileId] = def;
+              T[subKey] = tileId;
+              delete tileCache[tileId];
+              tileIds.push(tileId);
+            }
+          }
+          // Register tileset metadata
+          tilesets[tilesetKey] = {
+            key: tilesetKey,
+            category: specKey,
+            file: item.name,
+            cols: spec.cols,
+            rows: spec.rows,
+            kindCols: spec.kindCols,
+            kindRows: spec.kindRows,
+            kindW: spec.kindW,
+            kindH: spec.kindH,
+            autotile: spec.autotile,
+            passDefault: spec.passDefault,
+            terrain: spec.terrain,
+            tileIds: tileIds,
+            image: img,
+          };
+          // Add to project tilesets registry
+          project.tilesets = project.tilesets || {};
+          project.tilesets[tilesetKey] = {
+            key: tilesetKey,
+            category: specKey,
+            file: item.name,
+          };
+          console.log("Loaded MZ tileset: " + item.name + " (" + specKey + ", " + totalTiles + " tiles)");
+        } else {
+          // ---- Legacy single-tile external image ----
+          let id = project.assets.tiles[key];
+          const existingId = tiles.findIndex((t) => t && t.key === key);
+          if (id == null) {
+            id = existingId >= 0 ? existingId : nextTileId++;
+            project.assets.tiles[key] = id;
+          }
+          const terrain = /\.terrain$/i.test(item.name);
+          const pass = terrain || /\.pass$/i.test(item.name);
+          const def = {
+            key,
+            name: displayName(item.name),
+            pass,
+            terrain,
+            external: true,
+            assetName: item.name,
+            image: item.image,
+            draw(g) {
+              g.imageSmoothingEnabled = false;
+              g.drawImage(item.image, 0, 0, TILE, TILE);
+            },
+          };
+          while (tiles.length <= id) tiles.push(null);
+          tiles[id] = def;
+          T[key] = id;
+          delete tileCache[id];
         }
-        const terrain = /\.terrain$/i.test(item.name);
-        const pass = terrain || /\.pass$/i.test(item.name);
-        const def = {
-          key,
-          name: displayName(item.name),
-          pass,
-          terrain,
-          external: true,
-          assetName: item.name,
-          image: item.image,
-          draw(g) {
-            g.imageSmoothingEnabled = false;
-            g.drawImage(item.image, 0, 0, TILE, TILE);
-          },
-        };
-        while (tiles.length <= id) tiles.push(null);
-        tiles[id] = def;
-        T[key] = id;
-        delete tileCache[id];
       }
     }
     charCache = {};
@@ -1190,6 +1461,13 @@ const Assets = (() => {
   function collectUsedExternalKeys(project) {
     const used = new Set();
     const use = (key) => { if (externalByKey.has(key)) used.add(key); };
+    const useTilesetTile = (tile) => {
+      // For MZ tileset subtiles, use the parent tileset sheet key
+      if (tile && tile.external) {
+        const exportKey = tile.tileset ? assetKey("tilesets", tile.tileset) : tile.key;
+        if (externalByKey.has(exportKey)) used.add(exportKey);
+      }
+    };
     const useCharacterWithFace = (key) => {
       use(key);
       const character = externalByKey.get(key);
@@ -1213,7 +1491,7 @@ const Assets = (() => {
       for (const layer of Object.values(map.layers || {})) {
         for (const id of layer || []) {
           const tile = tiles[id];
-          if (tile && tile.external) use(tile.key);
+          useTilesetTile(tile);
         }
       }
       for (const event of map.events || []) {
@@ -1250,12 +1528,25 @@ const Assets = (() => {
     return item ? displayName(item.name) : key;
   }
 
+  function tilesetByKey(key) { return tilesets[key] || null; }
+  function tilesetName(key) {
+    const ts = tilesets[key];
+    return ts ? ts.file + " (" + ts.category + ")" : key;
+  }
+
   return {
     TILE, PALETTE_COLS, tiles, T, drawTile, tileCanvas, tilesetCanvas,
+    tilesets, tilesetByKey, tilesetName,
     charsets, charsetIndex, drawChar, charFrameCanvas, faceCanvas, charSheetCanvas,
     HAIR_STYLES, registerHuman, removeCharset, registerCustomChars,
     ENEMY_TYPES, enemyCanvas, assetLabel, loadExternalAssets, bindExternalAssets, exportUsedExternalAssets,
     ICON_SIZE, ICON_COUNT, loadIconSet, iconSpan, iconHtml, iconCanvas,
+    // Phase 3 — autotile
+    FLOOR_AUTOTILE_TABLE, WALL_AUTOTILE_TABLE, WATERFALL_AUTOTILE_TABLE,
+    FLOOR_QUARTERS, WALL_QUARTERS,
+    solveFloorSignature, solveWallMask,
+    composeFloorAutotile, composeWallAutotile, composeAutotile,
+    resolveA1Frame, detectNeighbors, placementsAdjacent,
   };
 })();
 

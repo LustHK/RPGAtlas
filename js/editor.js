@@ -24,7 +24,7 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
   let curMapId = 1;
   let layer = "auto";        // auto | ground | decor | decor2 | over
   let tool = "pen";          // pen | erase | rect | circle | fill | shadow
-  let mode = "map";          // map | event | pass | start | height
+  let mode = "map";          // map | event | pass | start | height | collision
   let selectedTile = 1;
   let heightVal = 1;         // HD-2D elevation value painted in height mode (0–9)
   let zoom = 0.75;
@@ -43,6 +43,34 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
   let clipTiles = null;      // tile clipboard {w,h,layers,shadows}
   let clipEvent = null;      // event clipboard (cloned event)
   let pasteMode = null;      // null | "tiles" | "event"
+  // ---- Phase 4 — grid-free editor state ----
+  // ---- grid-free editor state ----
+  let paletteTab = "all";          // "all" | tileset key (e.g. "TileA2") | "today"
+  let snapMode = "free";           // "48" | "24" | "free"
+  let selectedPlacement = null;    // {placement, layer} or null
+  let dragPlacement = false;       // dragging a placed tile in map mode
+  let dragPlacementObj = null;     // ref to the placement being dragged
+  let dragPlacementLayer = null;   // layer of the placement being dragged
+  let dragPlacementOffset = null;  // {dx, dy} from mouse to placement origin
+  let dragPlacementPushed = false; // undo snapshot taken for the current drag
+
+  // collision editor state (in-map visual editor)
+  let collisionEditCell = null; // {x,y}
+  let collisionEditRect = null; // {x,y,w,h} in pixels relative to tile
+  let collisionDragging = false;
+  let collisionDragHandle = null; // 'nw','n','ne','e','se','s','sw','w','move','maybe'
+  let collisionDragOffset = null; // for move: {dx,dy}
+  let collisionDragState = null; // 'handle' | 'move' | 'maybe' | 'select' | null
+  let collisionDragStart = null; // {x,y}
+  let collisionSelection = null; // {x1,y1,x2,y2}
+  let collisionDragMoved = false;
+  // ---- Phase 6 — free-form collision masks ----
+  let selectedMask = null;       // {mask, index} or null
+  let maskDragHandle = null;     // 'nw'|'n'|'ne'|'e'|'se'|'s'|'sw'|'w'|'move'|null
+  let maskDragOffset = null;     // {dx, dy} for move
+  let maskDragging = false;
+  let maskDragMoved = false;
+  let _maskIdCounter = 0;
   const undoStack = [];
   const redoStack = [];
 
@@ -339,6 +367,65 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
       }
     }
   }
+  function drawCollisionOverlay(g, m) {
+    // grid-cell collision rects (in-map visual editor)
+    if (m.collision && m.collision.tiles) {
+      for (let y = 0; y < m.height; y++) {
+        for (let x = 0; x < m.width; x++) {
+          const v = m.collision.tiles[y * m.width + x];
+          if (!v) continue;
+          g.fillStyle = "rgba(220,50,50,0.25)";
+          g.fillRect(x * TILE + 1, y * TILE + 1, TILE - 2, TILE - 2);
+          g.strokeStyle = "rgba(255,100,100,0.7)";
+          g.lineWidth = 1.5 / zoom;
+          g.strokeRect(x * TILE + 1, y * TILE + 1, TILE - 2, TILE - 2);
+          if (collisionEditCell && collisionEditCell.x === x && collisionEditCell.y === y && collisionEditRect) {
+            const r = collisionEditRect;
+            g.fillStyle = "rgba(100,200,255,0.3)";
+            g.fillRect(x * TILE + r.x, y * TILE + r.y, r.w, r.h);
+            g.strokeStyle = "#64c8ff";
+            g.lineWidth = 2 / zoom;
+            g.strokeRect(x * TILE + r.x, y * TILE + r.y, r.w, r.h);
+          }
+        }
+      }
+    }
+    // free-form collision masks
+    const masks = (m.collision && m.collision.masks) || [];
+    for (let mi = 0; mi < masks.length; mi++) {
+      const mask = masks[mi];
+      if (!mask) continue;
+      const isSelected = selectedMask && selectedMask.index === mi;
+      const rx = mask.x, ry = mask.y, rw = mask.w, rh = mask.h;
+      g.fillStyle = isSelected ? "rgba(255,200,80,0.22)" : "rgba(80,160,255,0.18)";
+      g.fillRect(rx, ry, rw, rh);
+      g.strokeStyle = isSelected ? "#ffc850" : "#50a0ff";
+      g.lineWidth = 2 / zoom;
+      g.strokeRect(rx + 1, ry + 1, rw - 2, rh - 2);
+      if (isSelected) {
+        const hs = Math.max(10, TILE * 0.12);
+        const half = hs / 2;
+        const pts = [
+          [rx, ry, "nw"], [rx + rw / 2, ry, "n"], [rx + rw, ry, "ne"],
+          [rx + rw, ry + rh / 2, "e"], [rx + rw, ry + rh, "se"],
+          [rx + rw / 2, ry + rh, "s"], [rx, ry + rh, "sw"], [rx, ry + rh / 2, "w"],
+        ];
+        g.fillStyle = "#ffc850";
+        for (const p of pts) g.fillRect(p[0] - half, p[1] - half, hs, hs);
+      }
+    }
+    // selection marquee in collision mode
+    if (collisionSelection) {
+      const r = collisionSelection;
+      g.fillStyle = "rgba(255,216,106,0.08)";
+      g.fillRect(r.x1, r.y1, r.x2 - r.x1, r.y2 - r.y1);
+      g.strokeStyle = "#ffd86a";
+      g.lineWidth = 2 / zoom;
+      g.setLineDash([8, 5]);
+      g.strokeRect(r.x1, r.y1, r.x2 - r.x1, r.y2 - r.y1);
+      g.setLineDash([]);
+    }
+  }
   function renderMap() {
     const m = curMap();
     if (!m) return;
@@ -349,6 +436,78 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
     g.imageSmoothingEnabled = zoom >= 1;
     g.fillStyle = "#15151d";
     g.fillRect(0, 0, m.width * TILE, m.height * TILE);
+    // ---- grid-free rendering ----
+    if (m.gridFree && m.tilePlacements) {
+      for (let li = 0; li < LAYER_ORDER.length; li++) {
+        const ln = LAYER_ORDER[li];
+        const arr = m.tilePlacements[ln] || [];
+        // Y-sort within layer for depth
+        const sorted = [...arr].sort((a, b) => a.y - b.y);
+        g.globalAlpha = layerAlpha(li);
+        for (const p of sorted) {
+          Assets.drawTile(g, p.tileId, p.x, p.y);
+          // highlight selected placement
+          if (selectedPlacement && selectedPlacement.placement && selectedPlacement.placement.id === p.id && selectedPlacement.layer === ln) {
+            g.strokeStyle = "#7ac8ff";
+            g.lineWidth = 2;
+            g.strokeRect(p.x + 1, p.y + 1, TILE - 2, TILE - 2);
+          }
+        }
+        if (li === 2) {
+          g.globalAlpha = 1;
+          drawShadows(g, m);
+        }
+      }
+      g.globalAlpha = 1;
+      // grid (also show for grid-free for reference)
+      g.strokeStyle = "rgba(255,255,255,0.09)";
+      g.lineWidth = 1 / zoom;
+      g.beginPath();
+      for (let x = 0; x <= m.width; x++) { g.moveTo(x * TILE, 0); g.lineTo(x * TILE, m.height * TILE); }
+      for (let y = 0; y <= m.height; y++) { g.moveTo(0, y * TILE); g.lineTo(m.width * TILE, y * TILE); }
+      g.stroke();
+      if (mode === "pass") drawPassOverlay(g, m);
+      if (mode === "height") drawHeightOverlay(g, m);
+      if (mode === "collision") drawCollisionOverlay(g, m);
+      // events in grid-free mode
+      if (mode === "event" || mode === "start") {
+        for (const ev of m.events) {
+          g.fillStyle = ev === selectedEvent ? "rgba(120,200,255,0.35)" : "rgba(255,255,255,0.14)";
+          g.fillRect(ev.x * TILE + 2, ev.y * TILE + 2, TILE - 4, TILE - 4);
+          g.strokeStyle = ev === selectedEvent ? "#7ac8ff" : "rgba(255,255,255,0.6)";
+          g.lineWidth = 2 / zoom;
+          g.strokeRect(ev.x * TILE + 2, ev.y * TILE + 2, TILE - 4, TILE - 4);
+          const pg = ev.pages[0];
+          if (pg && pg.charset) {
+            const ci = Assets.charsetIndex(pg.charset);
+            if (ci >= 0) Assets.drawChar(g, ci, pg.dir || 0, 1, ev.x * TILE, ev.y * TILE - 6);
+          }
+        }
+      }
+      // start marker
+      if (proj.system.startMapId === m.id) {
+        g.fillStyle = "rgba(110,230,140,0.8)";
+        g.fillRect(proj.system.startX * TILE + 8, proj.system.startY * TILE + 8, TILE - 16, TILE - 16);
+        g.fillStyle = "#0c2c14";
+        g.font = "bold 22px monospace";
+        g.textAlign = "center"; g.textBaseline = "middle";
+        g.fillText("S", proj.system.startX * TILE + TILE / 2, proj.system.startY * TILE + TILE / 2 + 1);
+      }
+      // hover preview in grid-free mode
+      if (hoverCell && !pasteMode && mode === "map") {
+        // show a ghost of the selected tile at cursor
+        if (!dragPlacement) {
+          g.globalAlpha = 0.5;
+          Assets.drawTile(g, selectedTile, hoverCell.x * TILE, hoverCell.y * TILE);
+          g.globalAlpha = 1;
+          g.strokeStyle = "#ffffff";
+          g.lineWidth = 2 / zoom;
+          g.strokeRect(hoverCell.x * TILE + 1, hoverCell.y * TILE + 1, TILE - 2, TILE - 2);
+        }
+      }
+      return; // skip legacy rendering below
+    }
+    // ---- legacy grid-based rendering ----
     // tile layers (layers above the active one are dimmed while drawing)
     for (let li = 0; li < LAYER_ORDER.length; li++) {
       const arr = m.layers[LAYER_ORDER[li]];
@@ -373,6 +532,7 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
     g.stroke();
     if (mode === "pass") drawPassOverlay(g, m);
     if (mode === "height") drawHeightOverlay(g, m);
+    if (mode === "collision") drawCollisionOverlay(g, m);
     // events
     if (mode === "event" || mode === "start") {
       for (const ev of m.events) {
@@ -456,15 +616,78 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
 
   // ============================ palette ============================
   let palCanvas;
+  function rebuildPalTabs() {
+    const wrap = $("palettewrap");
+    // remove old tabs (keep the canvas)
+    const oldTabs = wrap.querySelector(".pal-tabs");
+    if (oldTabs) oldTabs.remove();
+    // build tabs
+    const tabBar = h("div", { class: "pal-tabs" });
+    const tilesetKeys = Object.keys(Assets.tilesets || {});
+    const allBtn = h("button", { class: "pal-tab" + (paletteTab === "all" ? " sel" : ""), onclick() { paletteTab = "all"; rebuildPalTabs(); renderPalette(); } }, "All");
+    tabBar.appendChild(allBtn);
+    for (const key of tilesetKeys) {
+      const ts = Assets.tilesets[key];
+      if (!ts || !ts.tileIds || !ts.tileIds.length) continue;
+      const btn = h("button", { class: "pal-tab" + (paletteTab === key ? " sel" : ""), onclick() { paletteTab = key; rebuildPalTabs(); renderPalette(); } }, key);
+      tabBar.appendChild(btn);
+    }
+    const todayBtn = h("button", { class: "pal-tab" + (paletteTab === "today" ? " sel" : ""), onclick() { paletteTab = "today"; rebuildPalTabs(); renderPalette(); } }, "Today");
+    tabBar.appendChild(todayBtn);
+    wrap.insertBefore(tabBar, palCanvas);
+  }
   function renderPalette() {
-    const src = Assets.tilesetCanvas();
-    palCanvas.width = src.width; palCanvas.height = src.height;
+    // build tabs on first call if missing
+    const wrap = $("palettewrap");
+    if (!wrap.querySelector(".pal-tabs")) rebuildPalTabs();
+    // filter tiles based on active tab
+    let visibleTiles = [];
+    const allTiles = Assets.tiles;
+    if (paletteTab === "all") {
+      visibleTiles = allTiles.map((t, i) => i).filter(i => t && t.key);
+    } else if (paletteTab === "today") {
+      const m = curMap();
+      const usedIds = new Set();
+      if (m && m.tilePlacements) {
+        for (const ln of LAYER_ORDER) {
+          for (const p of (m.tilePlacements[ln] || [])) usedIds.add(p.tileId);
+        }
+      }
+      if (m && m.layers) {
+        for (const ln of LAYER_ORDER) {
+          for (let i = 0; i < m.width * m.height; i++) {
+            if (m.layers[ln][i] > 0) usedIds.add(m.layers[ln][i]);
+          }
+        }
+      }
+      visibleTiles = allTiles.map((t, i) => i).filter(i => t && usedIds.has(i));
+    } else {
+      // specific tileset tab
+      const ts = Assets.tilesets[paletteTab];
+      if (ts && ts.tileIds) {
+        visibleTiles = ts.tileIds.filter(id => id != null && allTiles[id]);
+      } else {
+        visibleTiles = allTiles.map((t, i) => i).filter(i => t && t.key);
+      }
+    }
+    if (visibleTiles.length === 0) visibleTiles = [0]; // at least show something
+    const cols = Math.max(1, Math.min(Assets.PALETTE_COLS, visibleTiles.length));
+    const rows = Math.ceil(visibleTiles.length / cols);
+    palCanvas.width = cols * TILE;
+    palCanvas.height = rows * TILE;
     const g = palCanvas.getContext("2d");
-    g.drawImage(src, 0, 0);
-    const sx = (selectedTile % Assets.PALETTE_COLS) * TILE;
-    const sy = Math.floor(selectedTile / Assets.PALETTE_COLS) * TILE;
-    g.strokeStyle = "#ffd86a"; g.lineWidth = 3;
-    g.strokeRect(sx + 2, sy + 2, TILE - 4, TILE - 4);
+    g.fillStyle = "#15151d";
+    g.fillRect(0, 0, palCanvas.width, palCanvas.height);
+    for (let i = 0; i < visibleTiles.length; i++) {
+      const id = visibleTiles[i];
+      const cx = (i % cols) * TILE;
+      const cy = Math.floor(i / cols) * TILE;
+      Assets.drawTile(g, id, cx, cy);
+      if (id === selectedTile) {
+        g.strokeStyle = "#ffd86a"; g.lineWidth = 3;
+        g.strokeRect(cx + 2, cy + 2, TILE - 4, TILE - 4);
+      }
+    }
   }
 
   // ============================ painting ============================
@@ -486,18 +709,56 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
   function normRect(a, b) {
     return { x1: Math.min(a.x, b.x), y1: Math.min(a.y, b.y), x2: Math.max(a.x, b.x), y2: Math.max(a.y, b.y) };
   }
+  function pixelFromMouse(e) {
+    const r = mapCanvas.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / zoom, y: (e.clientY - r.top) / zoom };
+  }
+  function snapPx(px) {
+    if (snapMode === "free") return px;
+    const step = snapMode === "48" ? TILE : TILE / 2;
+    return Math.round(px / step) * step;
+  }
+  function placementAt(px, py, layer) {
+    const m = curMap();
+    if (!m || !m.tilePlacements) return null;
+    const layers = layer ? [layer] : LAYER_ORDER;
+    for (const ln of layers) {
+      for (const p of (m.tilePlacements[ln] || [])) {
+        if (px >= p.x && px < p.x + TILE && py >= p.y && py < p.y + TILE) {
+          return { placement: p, layer: ln };
+        }
+      }
+    }
+    return null;
+  }
 
-  // ---- undo / redo (full map snapshots: tiles, shadows, passability, events) ----
+  // ---- undo / redo (full map snapshots: tiles, shadows, passability, events, collision masks) ----
   function snapshotOf(mapId) {
     const m = RA.byId(proj.maps, mapId);
-    return { mapId, layers: RA.clone(m.layers), shadows: m.shadows.slice(), passOv: m.passOv.slice(), heights: heightsOf(m).slice(), events: RA.clone(m.events) };
+    return {
+      mapId,
+      layers: RA.clone(m.layers),
+      shadows: m.shadows.slice(),
+      passOv: m.passOv.slice(),
+      heights: heightsOf(m).slice(),
+      events: RA.clone(m.events),
+      collision: m.collision ? RA.clone(m.collision) : null,
+      tilePlacements: RA.clone(m.tilePlacements),
+      gridFree: m.gridFree,
+    };
   }
   function applySnapshot(s) {
     const m = RA.byId(proj.maps, s.mapId);
     if (!m) return;
     m.layers = s.layers; m.shadows = s.shadows; m.passOv = s.passOv; m.heights = s.heights; m.events = s.events;
+    if (s.collision) m.collision = s.collision;
+    if (s.tilePlacements) m.tilePlacements = s.tilePlacements;
+    if (s.gridFree != null) m.gridFree = s.gridFree;
     if (curMapId !== s.mapId) { curMapId = s.mapId; rebuildMapList(); }
     selectedEvent = null;
+    selectedPlacement = null;
+    dragPlacement = false;
+    dragPlacementObj = null;
     touch(); renderMap(); refreshToolbar();
   }
   function pushUndo() {
@@ -532,6 +793,12 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
     const m = curMap(), i = y * m.width + x;
     for (const ln of ["over", "decor2", "decor"]) if (m.layers[ln][i]) return ln;
     return "ground";
+  }
+  // Auto layer for grid-free: terrain → ground, decor → decor (no decor2 stacking)
+  function resolvePlacementLayer(t) {
+    if (layer !== "auto") return layer;
+    const def = Assets.tiles[t];
+    return (def && def.terrain) ? "ground" : "decor";
   }
   // Auto layer: terrain tiles go to ground; decorations stack onto decor, then decor 2.
   function resolvePaintLayer(t, x, y) {
@@ -764,6 +1031,68 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
       else paintHeight(cell, tool === "erase" ? 0 : heightVal);
       return;
     }
+    if (mode === "collision") {
+      const m2 = curMap();
+      if (!m2.collision) m2.collision = { tiles: new Array(m2.width * m2.height).fill(null), masks: [] };
+      const px = pixelFromMouse(e);
+      // check free-form mask handles first
+      if (selectedMask && selectedMask.mask) {
+        const mk = selectedMask.mask;
+        const rx = mk.x, ry = mk.y, rw = mk.w, rh = mk.h;
+        const hs = Math.max(10, TILE * 0.12);
+        const half = hs / 2;
+        const handles = [
+          [rx, ry, "nw"], [rx + rw / 2, ry, "n"], [rx + rw, ry, "ne"],
+          [rx + rw, ry + rh / 2, "e"], [rx + rw, ry + rh, "se"],
+          [rx + rw / 2, ry + rh, "s"], [rx, ry + rh, "sw"], [rx, ry + rh / 2, "w"],
+        ];
+        for (const h of handles) {
+          if (px.x >= h[0] - half && px.x <= h[0] + half && px.y >= h[1] - half && px.y <= h[1] + half) {
+            maskDragHandle = h[2];
+            maskDragging = true;
+            maskDragOffset = { dx: px.x - rx, dy: px.y - ry };
+            maskDragMoved = false;
+            return;
+          }
+        }
+        // check mask body
+        if (px.x >= rx && px.x <= rx + rw && px.y >= ry && px.y <= ry + rh) {
+          maskDragHandle = "move";
+          maskDragging = true;
+          maskDragOffset = { dx: px.x - rx, dy: px.y - ry };
+          maskDragMoved = false;
+          return;
+        }
+      }
+      // check all masks for body hit (select)
+      for (let mi = 0; mi < (m2.collision.masks || []).length; mi++) {
+        const mk = m2.collision.masks[mi];
+        if (!mk) continue;
+        if (px.x >= mk.x && px.x <= mk.x + mk.w && px.y >= mk.y && px.y <= mk.y + mk.h) {
+          selectedMask = { mask: mk, index: mi };
+          maskDragHandle = "move";
+          maskDragging = true;
+          maskDragOffset = { dx: px.x - mk.x, dy: px.y - mk.y };
+          maskDragMoved = false;
+          renderMap(); refreshToolbar();
+          return;
+        }
+      }
+      // no hit — create a new mask
+      selectedMask = null;
+      maskDragging = false;
+      pushUndo();
+      const newMask = { id: ++_maskIdCounter, x: px.x - 24, y: px.y - 24, w: 48, h: 48 };
+      if (!m2.collision.masks) m2.collision.masks = [];
+      m2.collision.masks.push(newMask);
+      selectedMask = { mask: newMask, index: m2.collision.masks.length - 1 };
+      maskDragHandle = "move";
+      maskDragging = true;
+      maskDragOffset = { dx: 24, dy: 24 };
+      maskDragMoved = false;
+      touch(); renderMap(); refreshToolbar();
+      return;
+    }
     if (mode === "event") {
       selectedEvent = eventAt(cell.x, cell.y);
       dragEvent = selectedEvent;
@@ -772,6 +1101,51 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
       return;
     }
     // map mode
+    const m = curMap();
+    if (m.gridFree) {
+      const px = pixelFromMouse(e);
+      // right-click eyedropper
+      if (e.button === 2) {
+        const hit = placementAt(px.x, px.y);
+        if (hit) {
+          selectedTile = hit.placement.tileId;
+          renderPalette();
+          setStatus();
+        }
+        return;
+      }
+      if (e.button !== 0) return;
+      // check if clicking an existing placement
+      const hit = placementAt(px.x, px.y);
+      if (hit && hit.placement) {
+        selectedPlacement = hit;
+        dragPlacement = true;
+        dragPlacementObj = hit.placement;
+        dragPlacementLayer = hit.layer;
+        dragPlacementOffset = { dx: px.x - hit.placement.x, dy: px.y - hit.placement.y };
+        dragPlacementPushed = false;
+        renderMap(); refreshToolbar();
+        updatePropsPanel(hit.placement, hit.layer);
+        return;
+      }
+      // create new placement at pixel position
+      selectedPlacement = null;
+      pushUndo();
+      const ln = resolvePlacementLayer(selectedTile);
+      const sx = snapPx(px.x - TILE / 2);
+      const sy = snapPx(px.y - TILE / 2);
+      const np = {
+        id: crypto.randomUUID ? crypto.randomUUID() : "p_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
+        tileId: selectedTile,
+        x: sx,
+        y: sy,
+      };
+      if (!m.tilePlacements[ln]) m.tilePlacements[ln] = [];
+      m.tilePlacements[ln].push(np);
+      touch(); renderMap(); refreshToolbar();
+      return;
+    }
+    // legacy map mode
     if (e.shiftKey) { // marquee selection
       selecting = true;
       selAnchor = cell;
@@ -790,6 +1164,56 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
     const q = cell && tool === "shadow" && mode === "map" ? quadFromMouse(e) : 0;
     const changed = !cell || !hoverCell || cell.x !== hoverCell.x || cell.y !== hoverCell.y || q !== hoverQuad;
     hoverCell = cell; hoverQuad = q;
+    // collision mask drag/resize (check before cell bounds so masks can be dragged outside the grid)
+    if (mode === "collision" && maskDragging && selectedMask) {
+      const m2 = curMap();
+      if (!m2.collision || !m2.collision.masks) { if (!cell && changed) renderMap(); return; }
+      const mk = m2.collision.masks[selectedMask.index];
+      if (!mk) { if (!cell && changed) renderMap(); return; }
+      const px = pixelFromMouse(e);
+      maskDragMoved = true;
+      if (maskDragHandle === "move") {
+        mk.x = px.x - maskDragOffset.dx;
+        mk.y = px.y - maskDragOffset.dy;
+      } else {
+        const minS = 4;
+        const r = { x: mk.x, y: mk.y, w: mk.w, h: mk.h };
+        switch (maskDragHandle) {
+          case "nw": r.w += r.x - px.x; r.x = px.x; r.h += r.y - px.y; r.y = px.y; break;
+          case "n": r.h += r.y - px.y; r.y = px.y; break;
+          case "ne": r.w = px.x - r.x; r.h += r.y - px.y; r.y = px.y; break;
+          case "e": r.w = px.x - r.x; break;
+          case "se": r.w = px.x - r.x; r.h = px.y - r.y; break;
+          case "s": r.h = px.y - r.y; break;
+          case "sw": r.w += r.x - px.x; r.x = px.x; r.h = px.y - r.y; break;
+          case "w": r.w += r.x - px.x; r.x = px.x; break;
+        }
+        if (r.w >= minS && r.h >= minS) { mk.x = r.x; mk.y = r.y; mk.w = r.w; mk.h = r.h; }
+      }
+      touch(); renderMap();
+      return;
+    }
+    // grid-free placement drag
+    if (mode === "map" && dragPlacement && dragPlacementObj) {
+      const px = pixelFromMouse(e);
+      if (!dragPlacementPushed) {
+        pushUndo();
+        dragPlacementPushed = true;
+        // refresh ref after undo snapshot cloned the placement
+        const m2 = curMap();
+        const arr2 = m2.tilePlacements[dragPlacementLayer] || [];
+        const updated = arr2.find(p => p.id === dragPlacementObj.id);
+        if (updated) dragPlacementObj = updated;
+      }
+      if (dragPlacementObj) {
+        dragPlacementObj.x = snapPx(px.x - dragPlacementOffset.dx);
+        dragPlacementObj.y = snapPx(px.y - dragPlacementOffset.dy);
+        if (selectedPlacement) selectedPlacement.placement = dragPlacementObj;
+        updatePropsPanel(dragPlacementObj, dragPlacementLayer);
+        touch(); renderMap();
+      }
+      return;
+    }
     if (!cell) { if (changed) renderMap(); return; }
     if (selecting) {
       selection = normRect(selAnchor, cell);
@@ -815,6 +1239,26 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
     setStatus();
   }
   function onCanvasUp() {
+    if (mode === "map" && dragPlacement) {
+      dragPlacement = false;
+      dragPlacementObj = null;
+      dragPlacementLayer = null;
+      dragPlacementOffset = null;
+      dragPlacementPushed = false;
+      renderMap(); refreshToolbar();
+      return;
+    }
+    if (mode === "collision") {
+      if (maskDragging && selectedMask && !maskDragMoved) {
+        // click without drag — just select; no undo snapshot needed
+      }
+      maskDragging = false;
+      maskDragHandle = null;
+      maskDragOffset = null;
+      maskDragMoved = false;
+      if (selectedMask) { renderMap(); refreshToolbar(); }
+      return;
+    }
     if (selecting) {
       selecting = false; selAnchor = null;
       refreshToolbar(); renderMap();
@@ -862,10 +1306,25 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
       : mode === "event" ? "Event mode (double-click = new/edit, drag = move)"
       : mode === "pass" ? "Passability (click cycles auto → ✕ block → ○ pass)"
       : mode === "height" ? "Heights — painting " + heightVal + " with " + TOOL_LABELS[tool] + " (keys 0–9 set the value, right-click picks, Eraser clears)"
+      : mode === "collision" ? "Collision — click grid cells to edit per-tile rects, click empty area to create free-form masks (Delete removes selected, Esc deselects)"
       : "Click the map to set the start position");
     if (hoverCell && m) {
       s += "  ·  " + hoverCell.x + "," + hoverCell.y;
-      if (mode === "map") {
+      if (mode === "map" && m.gridFree && m.tilePlacements) {
+        // show info about placement under cursor
+        const px = (hoverCell.x + 0.5) * TILE;
+        const py = (hoverCell.y + 0.5) * TILE;
+        const hit = placementAt(px, py);
+        if (hit) {
+          const t = Assets.tiles[hit.placement.tileId];
+          s += "  ·  " + hit.layer + ": " + (t ? t.name : "?");
+          if (selectedPlacement && selectedPlacement.placement && selectedPlacement.placement.id === hit.placement.id) {
+            s += " [selected]";
+          }
+        } else {
+          s += "  ·  snap: " + snapMode;
+        }
+      } else if (mode === "map") {
         const ln = layer === "auto" ? topLayerAt(hoverCell.x, hoverCell.y) : layer;
         const t = getCell(hoverCell.x, hoverCell.y, ln);
         s += "  ·  " + ln + ": " + (Assets.tiles[t] ? Assets.tiles[t].name : "?");
@@ -878,9 +1337,26 @@ const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window
       if (ev) s += "  ·  " + ev.name;
     }
     if (mode === "map" && selection) s += "  ·  selection " + (selection.x2 - selection.x1 + 1) + "×" + (selection.y2 - selection.y1 + 1);
-    if (mode === "map") s += "  ·  brush: " + (Assets.tiles[selectedTile] ? Assets.tiles[selectedTile].name : "?");
+    if (mode === "map") {
+      s += "  ·  brush: " + (Assets.tiles[selectedTile] ? Assets.tiles[selectedTile].name : "?");
+      if (m && m.gridFree) s += "  ·  snap: " + snapMode;
+    }
     $("status-text").textContent = s;
     $("zoom-ind").textContent = Math.round(zoom * 100) + "%";
+  }
+  // ---- grid-free properties panel ----
+  function updatePropsPanel(placement, layer) {
+    const section = $("props-section");
+    if (!placement) {
+      section.style.display = "none";
+      return;
+    }
+    const t = Assets.tiles[placement.tileId];
+    $("prop-tile-name").textContent = t ? t.name : "?";
+    $("prop-layer").textContent = layer || "?";
+    $("prop-x").textContent = placement.x.toFixed(1);
+    $("prop-y").textContent = placement.y.toFixed(1);
+    section.style.display = "";
   }
   let statusFlashT = null;
   function flashStatus(msg) {
@@ -3486,6 +3962,7 @@ atlas.onMapLoad((map) => {
     shadow: svgIcon('<rect x="3.5" y="3.5" width="13" height="13"/><path d="M16.5 3.5 3.5 16.5"/><path d="M16.5 3.5v13h-13z" fill="currentColor" stroke="none" opacity="0.45"/>'),
     height: svgIcon('<path d="M3 16.5h4v-4h4v-4h4v-5"/><path d="M12.5 6 15 3.5 17.5 6"/>'),
     hd2d: svgIcon('<path d="M2.5 14.5l5-8 4 6 2-3 4 5"/><path d="M2.5 17h15"/>'),
+    collision: svgIcon('<path d="M10 2.5l7.2 4.2v8.3L10 19.5l-7.2-4.5V6.7z"/><path d="M10 6.5v6.5M6.8 9.8H13.2"/>'),
     zoomin: svgIcon('<circle cx="8.8" cy="8.8" r="5.6"/><path d="M13 13l4.3 4.3"/><path d="M6.3 8.8h5M8.8 6.3v5"/>'),
     zoomout: svgIcon('<circle cx="8.8" cy="8.8" r="5.6"/><path d="M13 13l4.3 4.3"/><path d="M6.3 8.8h5"/>'),
     zoom1: svgIcon('<circle cx="8.8" cy="8.8" r="5.6"/><path d="M13 13l4.3 4.3"/><text x="8.8" y="10.9" font-size="5.6" font-weight="bold" text-anchor="middle" fill="currentColor" stroke="none" font-family="monospace">1:1</text>'),
@@ -3496,6 +3973,7 @@ atlas.onMapLoad((map) => {
     resources: svgIcon('<rect x="3" y="4" width="14" height="12" rx="1.5"/><circle cx="7.4" cy="8.4" r="1.5"/><path d="M3 13.8l4-4 3 3 3.4-3.4 3.6 3.6"/>'),
     chargen: svgIcon('<circle cx="8" cy="6.5" r="3"/><path d="M2.8 17c.5-3.6 2.6-5.1 5.2-5.1s4.7 1.5 5.2 5.1"/><path d="M15.6 4.6v5M13.1 7.1h5"/>'),
     play: svgIcon('<path d="M5.5 3.5v13l10.5-6.5z" fill="currentColor" stroke="none"/>'),
+    snap: svgIcon('<path d="M4 4h4v4H4zM12 4h4v4h-4zM4 12h4v4H4zM12 12h4v4h-4z"/>'),
   };
   [["auto", "A"], ["ground", "1"], ["decor", "2"], ["decor2", "3"], ["over", "4"]].forEach(([ln, glyph]) => {
     ICONS["layer-" + ln] = svgIcon(layerGlyph +
@@ -3550,6 +4028,7 @@ atlas.onMapLoad((map) => {
   act("mode-height", { label: "Height Mode (HD-2D)", icon: "height", key: "H",
     tip: "Heights — paint HD-2D elevation with the Pen / Rectangle / Circle / Fill tools (keys 0–9 set the value)",
     active: () => mode === "height", run: () => setMode("height") });
+  act("mode-collision", { label: "Collision Mode", icon: "collision", tip: "Collision — edit per-tile and free-form collision masks", active: () => mode === "collision", run: () => setMode("collision") });
   act("mode-start", { label: "Set Start Position…", active: () => mode === "start", run() {
     setMode("start");
     flashStatus("Click the map to set the player start position");
@@ -3571,6 +4050,14 @@ atlas.onMapLoad((map) => {
   act("zoomout", { label: "Zoom Out", icon: "zoomout", key: "−", run: () => zoomStep(-1) });
   act("zoom1", { label: "Zoom 1:1", icon: "zoom1", key: "Ctrl+0", tip: "Set zoom to 100%", active: () => Math.abs(zoom - 1) < 0.01, run: () => setZoom(1) });
   act("zoomfit", { label: "Fit Map In View", run: () => zoomFit() });
+  act("snap-toggle", { label: "Toggle Snap", icon: "snap", tip: "Snap mode: " + snapMode,
+    active: () => false,
+    run() {
+      const cycle = { free: "24", 24: "48", 48: "free" };
+      snapMode = cycle[snapMode] || "free";
+      flashStatus("Snap: " + (snapMode === "free" ? "Free" : snapMode + "px"));
+      refreshToolbar();
+    } });
 
   act("db", { label: "Database…", icon: "db", tip: "Database — actors, items, enemies, switches…", run: openDatabase });
   act("plugins", { label: "Plugin Manager…", icon: "plugins", tip: "Plugin Manager — project JavaScript run at game boot", run: openPluginManager });
@@ -3586,10 +4073,10 @@ atlas.onMapLoad((map) => {
     ["new", "open", "save"],
     ["cut", "copy", "paste"],
     ["undo", "redo"],
-    ["mode-map", "mode-event", "mode-pass", "mode-height"],
+    ["mode-map", "mode-event", "mode-pass", "mode-height", "mode-collision"],
     ["layer-auto", "layer-ground", "layer-decor", "layer-decor2", "layer-over"],
     ["tool-pen", "tool-erase", "tool-rect", "tool-circle", "tool-fill", "tool-shadow"],
-    ["zoomin", "zoomout", "zoom1"],
+    ["zoomin", "zoomout", "zoom1", "snap-toggle"],
     ["db", "plugins", "audio", "search", "resources", "chargen"],
     ["hdpreview", "play"],
   ];
@@ -3624,8 +4111,8 @@ atlas.onMapLoad((map) => {
   const MENUS = [
     { label: "File", items: ["new", "open", "save", "export", "build", "-", "play"] },
     { label: "Edit", items: ["undo", "redo", "-", "cut", "copy", "paste", "-", "deselect"] },
-    { label: "Mode", items: ["mode-map", "mode-event", "mode-pass", "mode-height", "-", "mode-start"] },
-    { label: "Draw", items: ["tool-pen", "tool-erase", "tool-rect", "tool-circle", "tool-fill", "tool-shadow"] },
+    { label: "Mode", items: ["mode-map", "mode-event", "mode-pass", "mode-height", "mode-collision", "-", "mode-start"] },
+    { label: "Draw", items: ["tool-pen", "tool-erase", "tool-rect", "tool-circle", "tool-fill", "tool-shadow", "-", "snap-toggle"] },
     { label: "Layer", items: ["layer-auto", "layer-ground", "layer-decor", "layer-decor2", "layer-over"] },
     { label: "Scale", items: ["zoomin", "zoomout", "zoom1", "zoomfit"] },
     { label: "Tools", items: ["db", "plugins", "audio", "search", "resources", "chargen"] },
@@ -3685,6 +4172,10 @@ atlas.onMapLoad((map) => {
   function setMode(m) {
     mode = m;
     selectedEvent = null;
+    selectedPlacement = null;
+    updatePropsPanel(null);
+    dragPlacement = false;
+    dragPlacementObj = null;
     pasteMode = null;
     renderMap(); refreshToolbar(); setStatus();
   }
@@ -3745,14 +4236,78 @@ atlas.onMapLoad((map) => {
     palCanvas.addEventListener("mousedown", (e) => {
       const r = palCanvas.getBoundingClientRect();
       const x = Math.floor((e.clientX - r.left) / TILE), y = Math.floor((e.clientY - r.top) / TILE);
-      const id = y * Assets.PALETTE_COLS + x;
-      if (id >= 0 && Assets.tiles[id]) { selectedTile = id; renderPalette(); setStatus(); }
+      const cols = palCanvas.width / TILE;
+      const idx = y * cols + x;
+      // find the actual tile id from the filtered palette
+      const allTiles = Assets.tiles;
+      let visibleTiles = [];
+      if (paletteTab === "all") {
+        visibleTiles = allTiles.map((t, i) => i).filter(i => t && t.key);
+      } else if (paletteTab === "today") {
+        const m = curMap();
+        const usedIds = new Set();
+        if (m && m.tilePlacements) {
+          for (const ln of LAYER_ORDER) {
+            for (const p of (m.tilePlacements[ln] || [])) usedIds.add(p.tileId);
+          }
+        }
+        if (m && m.layers) {
+          for (const ln of LAYER_ORDER) {
+            for (let i = 0; i < m.width * m.height; i++) {
+              if (m.layers[ln][i] > 0) usedIds.add(m.layers[ln][i]);
+            }
+          }
+        }
+        visibleTiles = allTiles.map((t, i) => i).filter(i => t && usedIds.has(i));
+      } else {
+        const ts = Assets.tilesets[paletteTab];
+        if (ts && ts.tileIds) {
+          visibleTiles = ts.tileIds.filter(id => id != null && allTiles[id]);
+        } else {
+          visibleTiles = allTiles.map((t, i) => i).filter(i => t && t.key);
+        }
+      }
+      if (visibleTiles.length === 0) visibleTiles = [0];
+      const id = visibleTiles[idx];
+      if (id != null && Assets.tiles[id]) { selectedTile = id; renderPalette(); setStatus(); }
     });
     palCanvas.addEventListener("mousemove", (e) => {
       const r = palCanvas.getBoundingClientRect();
       const x = Math.floor((e.clientX - r.left) / TILE), y = Math.floor((e.clientY - r.top) / TILE);
-      const id = y * Assets.PALETTE_COLS + x;
-      palCanvas.title = Assets.tiles[id] ? Assets.tiles[id].name : "";
+      const cols = palCanvas.width / TILE;
+      const idx = y * cols + x;
+      // find tile name from filtered palette
+      const allTiles = Assets.tiles;
+      let visibleTiles = [];
+      if (paletteTab === "all") {
+        visibleTiles = allTiles.map((t, i) => i).filter(i => t && t.key);
+      } else if (paletteTab === "today") {
+        const m = curMap();
+        const usedIds = new Set();
+        if (m && m.tilePlacements) {
+          for (const ln of LAYER_ORDER) {
+            for (const p of (m.tilePlacements[ln] || [])) usedIds.add(p.tileId);
+          }
+        }
+        if (m && m.layers) {
+          for (const ln of LAYER_ORDER) {
+            for (let i = 0; i < m.width * m.height; i++) {
+              if (m.layers[ln][i] > 0) usedIds.add(m.layers[ln][i]);
+            }
+          }
+        }
+        visibleTiles = allTiles.map((t, i) => i).filter(i => t && usedIds.has(i));
+      } else {
+        const ts = Assets.tilesets[paletteTab];
+        if (ts && ts.tileIds) {
+          visibleTiles = ts.tileIds.filter(id => id != null && allTiles[id]);
+        } else {
+          visibleTiles = allTiles.map((t, i) => i).filter(i => t && t.key);
+        }
+      }
+      if (visibleTiles.length === 0) visibleTiles = [0];
+      const id = visibleTiles[idx];
+      palCanvas.title = (id != null && Assets.tiles[id]) ? Assets.tiles[id].name : "";
     });
 
     // map canvas
@@ -3785,7 +4340,9 @@ atlas.onMapLoad((map) => {
       if (e.code === "Escape") {
         if (menuOpenRef) { closeMenus(); return; }
         if (pasteMode || selection) { clearSelection(); return; }
-        if (selectedEvent) { selectedEvent = null; renderMap(); refreshToolbar(); }
+        if (selectedEvent) { selectedEvent = null; renderMap(); refreshToolbar(); return; }
+        if (selectedMask) { selectedMask = null; maskDragging = false; renderMap(); refreshToolbar(); return; }
+        if (selectedPlacement) { selectedPlacement = null; updatePropsPanel(null); renderMap(); refreshToolbar(); return; }
         return;
       }
       if (e.ctrlKey || e.metaKey) {
@@ -3812,6 +4369,7 @@ atlas.onMapLoad((map) => {
         case "KeyO": runAct("tool-circle"); break;
         case "KeyF": runAct("tool-fill"); break;
         case "KeyS": runAct("tool-shadow"); break;
+        case "KeyC": runAct("mode-collision"); break;
         case "KeyH": runAct("mode-height"); break;
         case "Digit0": runAct("layer-auto"); break;
         case "Digit1": runAct("layer-ground"); break;
@@ -3821,7 +4379,24 @@ atlas.onMapLoad((map) => {
         case "Equal": case "NumpadAdd": zoomStep(1); break;
         case "Minus": case "NumpadSubtract": zoomStep(-1); break;
         case "Delete": case "Backspace":
-          if (mode === "event" && selectedEvent) {
+          if (mode === "collision" && selectedMask) {
+            pushUndo();
+            const m = curMap();
+            if (m.collision && m.collision.masks) {
+              m.collision.masks.splice(selectedMask.index, 1);
+            }
+            selectedMask = null;
+            touch(); renderMap(); refreshToolbar();
+          } else if (mode === "map" && selectedPlacement) {
+            pushUndo();
+            const m = curMap();
+            const pl = m.tilePlacements[selectedPlacement.layer] || [];
+            const idx = pl.findIndex(p => p.id === selectedPlacement.placement.id);
+            if (idx >= 0) pl.splice(idx, 1);
+            selectedPlacement = null;
+            updatePropsPanel(null);
+            touch(); renderMap(); refreshToolbar();
+          } else if (mode === "event" && selectedEvent) {
             pushUndo();
             const m = curMap();
             m.events = m.events.filter((x) => x !== selectedEvent);

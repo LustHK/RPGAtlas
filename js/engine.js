@@ -30,6 +30,8 @@ const _createMessageSystem = window.createMessageSystem;
   let scene = "boot"; // boot | title | map | battle | gameover
   let menuOpen = false;
   let cameraZoom = 1;
+  let _camSmoothX = 0, _camSmoothY = 0;
+  let _camInitialized = false;
 
   let shakePower = 0;
   let shakeSpeed = 0;
@@ -386,6 +388,7 @@ const _createMessageSystem = window.createMessageSystem;
 
   // ============================ map runtime ============================
   let map = null;
+  let physicsWorld = null; // created per-map by Physics.buildWorld(map, Assets, TILE)
   let lowerBuf = null,
     upperBuf = null;
   let hdActive = false; // current map renders through the WebGL HD-2D path
@@ -403,6 +406,7 @@ const _createMessageSystem = window.createMessageSystem;
     )
       return true;
     if (map.lights && map.lights.length > 0) return true;
+    if (map.particles && map.particles.length > 0) return true;
     return false;
   }
   let evRTs = [];
@@ -414,6 +418,9 @@ const _createMessageSystem = window.createMessageSystem;
   }
   function tilePassable(x, y) {
     if (x < 0 || y < 0 || x >= map.width || y >= map.height) return false;
+    if (map.gridFree && map._passGrid) {
+      return map._passGrid[y * map.width + x] !== 0;
+    }
     const ov = map.passOv ? map.passOv[y * map.width + x] : 0;
     if (ov === 1) return true;
     if (ov === 2) return false;
@@ -444,6 +451,21 @@ const _createMessageSystem = window.createMessageSystem;
     }
     return light;
   }
+
+  // HD-2D particle emitters are authored as events named
+  // "particle [kind] [rate] [#color]",
+  // e.g. "particle fire 20 #ff8844". The emitter follows the event.
+  function parseParticle(name) {
+    if (!/^particle\b/i.test(name || "")) return null;
+    const p = { kind: "fire", rate: 10, color: "#ff8844" };
+    for (const tok of String(name).slice(8).trim().split(/\s+/)) {
+      if (tok === "fire" || tok === "smoke" || tok === "spark" || tok === "star")
+        p.kind = tok;
+      else if (/^\d+$/.test(tok)) p.rate = Number(tok);
+      else if (/^#[0-9a-fA-F]{6}$/.test(tok)) p.color = tok;
+    }
+    return p;
+  }
   function makeEvRT(evData) {
     const rt = {
       ev: evData,
@@ -467,6 +489,9 @@ const _createMessageSystem = window.createMessageSystem;
       charsetIdx: -1,
       kind: "",
       light: parseLight(evData.name),
+      particle: parseParticle(evData.name),
+      body: null,
+      blocking: true,
     };
     refreshPage(rt);
     return rt;
@@ -492,6 +517,12 @@ const _createMessageSystem = window.createMessageSystem;
       rt.charsetIdx = -1;
       rt.kind = "";
     }
+    if (rt.body) {
+      const isBlocking =
+        rt.page && rt.page.priority === "same" && !rt.page.through;
+      rt.blocking = isBlocking;
+      rt.body.blocking = isBlocking;
+    }
   }
   function refreshAllPages() {
     evRTs.forEach((rt) => {
@@ -500,6 +531,12 @@ const _createMessageSystem = window.createMessageSystem;
   }
 
   async function prerenderMap() {
+    if (map.gridFree) {
+      lowerBuf = null;
+      upperBuf = null;
+      hdActive = false;
+      return;
+    }
     lowerBuf = document.createElement("canvas");
     lowerBuf.width = map.width * TILE;
     lowerBuf.height = map.height * TILE;
@@ -540,6 +577,94 @@ const _createMessageSystem = window.createMessageSystem;
     if (hdActive) await Renderer.setMap(lowerBuf, upperBuf, map);
   }
 
+  // ---- Phase 5 — Grid-free tile placement rendering ----
+  function renderTilePlacements(ctx, placements, camX, camY, viewW, viewH) {
+    if (!placements || placements.length === 0) return;
+    const sorted = [...placements].sort((a, b) => a.y - b.y);
+    const m = TILE;
+    const vx1 = camX - m, vy1 = camY - m;
+    const vx2 = camX + viewW + m, vy2 = camY + viewH + m;
+    for (const p of sorted) {
+      if (p.x + m < vx1 || p.y + m < vy1 || p.x > vx2 || p.y > vy2) continue;
+      const tile = Assets.tiles[p.tileId];
+      if (!tile) continue;
+      const dx = Math.round(p.x - camX);
+      const dy = Math.round(p.y - camY);
+      if (tile.autotile && tile.image && tile.tileset) {
+        drawComposedAutotile(ctx, p, placements, tile, dx, dy);
+      } else {
+        Assets.drawTile(ctx, p.tileId, dx, dy);
+      }
+    }
+  }
+
+  function drawComposedAutotile(ctx, placement, all, tile, dx, dy) {
+    const tileset = Assets.tilesets[tile.tileset];
+    if (!tileset || !tile.image) {
+      Assets.drawTile(ctx, placement.tileId, dx, dy);
+      return;
+    }
+    const cat = tile.category;
+    const ki = tile.kindIndex;
+    let originQx, originQy, isWall = false;
+    if (cat === "A2") {
+      originQx = 4 * (ki % tileset.kindCols);
+      originQy = 6 * Math.floor(ki / tileset.kindCols);
+    } else if (cat === "A4") {
+      const band = Math.floor(ki / 16);
+      const inBand = ki % 16;
+      const col = ki % 8;
+      isWall = inBand >= 8;
+      originQx = 4 * col;
+      originQy = isWall ? 10 * band + 6 : 10 * band;
+    } else if (cat === "A3") {
+      originQx = 4 * (ki % tileset.kindCols);
+      originQy = 4 * Math.floor(ki / tileset.kindCols);
+    } else {
+      Assets.drawTile(ctx, placement.tileId, dx, dy);
+      return;
+    }
+    const neigh = Assets.detectNeighbors(placement, all, TILE);
+    if (isWall) {
+      const mask = ((neigh.n || 0) ? 8 : 0) | ((neigh.s || 0) ? 4 : 0) |
+                   ((neigh.w || 0) ? 2 : 0) | ((neigh.e || 0) ? 1 : 0);
+      const composed = Assets.composeWallAutotile(tile.image, originQx, originQy, mask);
+      ctx.drawImage(composed, dx, dy);
+    } else {
+      const sig = Assets.solveFloorSignature(
+        neigh.n, neigh.s, neigh.w, neigh.e,
+        neigh.nw, neigh.ne, neigh.sw, neigh.se
+      );
+      const composed = Assets.composeFloorAutotile(
+        tile.image, originQx, originQy,
+        sig.tl, sig.tr, sig.bl, sig.br
+      );
+      ctx.drawImage(composed, dx, dy);
+    }
+  }
+
+  function buildPassGrid(map) {
+    map._passGrid = new Uint8Array(map.width * map.height);
+    for (let i = 0; i < map._passGrid.length; i++) map._passGrid[i] = 1;
+    for (const ln of ["decor2", "decor", "ground"]) {
+      const arr = map.tilePlacements[ln];
+      if (!arr) continue;
+      for (const p of arr) {
+        const tile = Assets.tiles[p.tileId];
+        if (!tile || tile.pass !== false) continue;
+        const gx1 = Math.max(0, Math.floor(p.x / TILE));
+        const gy1 = Math.max(0, Math.floor(p.y / TILE));
+        const gx2 = Math.min(map.width - 1, Math.floor((p.x + TILE - 1) / TILE));
+        const gy2 = Math.min(map.height - 1, Math.floor((p.y + TILE - 1) / TILE));
+        for (let gy = gy1; gy <= gy2; gy++) {
+          for (let gx = gx1; gx <= gx2; gx++) {
+            map._passGrid[gy * map.width + gx] = 0;
+          }
+        }
+      }
+    }
+  }
+
   async function loadMap(mapId) {
     map = RA.byId(proj.maps, mapId);
     if (!map) throw new Error("Map " + mapId + " not found");
@@ -547,9 +672,40 @@ const _createMessageSystem = window.createMessageSystem;
     G.encSteps = 0;
     evRTs = map.events.map(makeEvRT);
     parallels.clear();
+    _camInitialized = false;
     await prerenderMap();
+    if (map.gridFree) buildPassGrid(map);
     Music.play(map.music || "none");
     Plugins.fire("mapLoad", map);
+    // Build a lightweight physics world from the map for collision queries.
+    try {
+      if (window.Physics && typeof window.Physics.buildWorld === "function") {
+        physicsWorld = window.Physics.buildWorld(map, Assets, TILE);
+      } else {
+        physicsWorld = null;
+      }
+    } catch (e) {
+      console.error("Physics.buildWorld failed:", e);
+      physicsWorld = null;
+    }
+    if (physicsWorld && physicsWorld.addDynamic) {
+      if (G.player && G.player.body) physicsWorld.addDynamic(G.player.body);
+      for (const rt of evRTs) {
+        const isBlocking =
+          rt.page && rt.page.priority === "same" && !rt.page.through;
+        rt.blocking = isBlocking;
+        const bounds = { w: TILE * 0.8, h: TILE * 0.8 };
+        rt.body = {
+          x: rt.x * TILE + (TILE - bounds.w) / 2,
+          y: rt.y * TILE + (TILE - bounds.h),
+          w: bounds.w,
+          h: bounds.h,
+          type: "kinematic",
+          blocking: isBlocking,
+        };
+        physicsWorld.addDynamic(rt.body);
+      }
+    }
   }
 
   function entityAt(x, y, exclude) {
@@ -608,9 +764,17 @@ const _createMessageSystem = window.createMessageSystem;
       ent.x = ent.tx;
       ent.y = ent.ty;
       ent.moving = false;
+      if (ent.body) {
+        ent.body.x = ent.x * TILE + (TILE - ent.body.w) / 2;
+        ent.body.y = ent.y * TILE + (TILE - ent.body.h);
+      }
       return true; // arrived
     }
     ent.animT++;
+    if (ent.body) {
+      ent.body.x = ent.rx * TILE + (TILE - ent.body.w) / 2;
+      ent.body.y = ent.ry * TILE + (TILE - ent.body.h);
+    }
     return false;
   }
   function walkFrame(ent) {
@@ -1074,49 +1238,117 @@ const _createMessageSystem = window.createMessageSystem;
     if (scene !== "map" || menuOpen) return;
 
     const p = G.player;
-    // player motion
-    if (p.moving) {
-      const arrived = updateEntityMotion(p, held.dash ? 0.13 : 0.085);
-      if (arrived) onPlayerStep();
-    } else if (p.route) {
-      updateRoute(p);
-    } else if (activePlayerControl()) {
-      const d = held.down
-        ? 0
-        : held.left
-          ? 1
-          : held.right
-            ? 2
-            : held.up
-              ? 3
-              : -1;
-      if (d >= 0) {
-        p.dir = d;
-        const [dx, dy] = DIRD[d];
-        const nx = p.x + dx,
-          ny = p.y + dy;
-        const blocker = blockingEventAt(nx, ny);
-        if (
-          blocker &&
-          blocker.page.trigger === "touch" &&
-          blocker.page.commands.length
-        ) {
-          runEventBlocking(blocker);
-        } else if (tilePassable(nx, ny) && !blocker) {
-          startMove(p, d);
-          p.animT = p.animT || 0;
+    // player motion — support both tile-based and pixel-based movement
+    const pixelMode = proj && proj.system && proj.system.pixelMovement;
+    if (pixelMode) {
+      // pixel movement: continuous body + simple wall-sliding using Physics
+      const speedBase = held.dash ? 6 : 3; // px/frame default
+      if (activePlayerControl()) {
+        let dx = (held.right ? 1 : 0) - (held.left ? 1 : 0);
+        let dy = (held.down ? 1 : 0) - (held.up ? 1 : 0);
+        if (dx === 0 && dy === 0) {
+          p.moving = false;
+        } else {
+          const horiz = dx !== 0;
+          const vert = dy !== 0;
+          const heldDir = (dir) =>
+            (dir === 2 && held.right) ||
+            (dir === 1 && held.left) ||
+            (dir === 0 && held.down) ||
+            (dir === 3 && held.up);
+          if (horiz && vert) {
+            if (!heldDir(p.dir)) {
+              if (Math.abs(dx) > Math.abs(dy)) {
+                p.dir = dx > 0 ? 2 : 1;
+              } else {
+                p.dir = dy > 0 ? 0 : 3;
+              }
+            }
+          } else if (horiz) {
+            p.dir = dx > 0 ? 2 : 1;
+          } else if (vert) {
+            p.dir = dy > 0 ? 0 : 3;
+          }
+          const diagOk = proj.system.diagonalMove !== false;
+          if (dx !== 0 && dy !== 0 && diagOk) {
+            const k = Math.SQRT1_2; // 1/sqrt(2)
+            dx *= k;
+            dy *= k;
+          }
+          const speed = speedBase;
+          const move = Physics.moveWithSlide(
+            p.body,
+            dx * speed,
+            dy * speed,
+            physicsWorld || { tileBodies: [], dynamicBodies: [] },
+          );
+          p.moving = move.x !== 0 || move.y !== 0;
+          if (p.moving) p.animT = (p.animT || 0) + 1;
+          // sync pixel coords and tile coords
+          p.px = p.body.x - (TILE - p.bounds.w) / 2;
+          p.py = p.body.y - (TILE - p.bounds.h);
+          p.rx = p.px / TILE;
+          p.ry = p.py / TILE;
+          const newTx = Math.floor(p.px / TILE);
+          const newTy = Math.floor(p.py / TILE);
+          if (newTx !== p.x || newTy !== p.y) {
+            p.x = newTx;
+            p.y = newTy;
+            onPlayerStep();
+          }
+        }
+        if (okTriggered) checkActionTrigger();
+        if (cancelTriggered) {
+          cancelTriggered = false;
+          okTriggered = false;
+          openMenu();
         }
       }
-      if (okTriggered) checkActionTrigger();
-      if (cancelTriggered) {
-        cancelTriggered = false;
-        okTriggered = false;
-        openMenu();
+    } else {
+      // existing tile-based movement
+      if (p.moving) {
+        const arrived = updateEntityMotion(p, held.dash ? 0.13 : 0.085);
+        if (arrived) onPlayerStep();
+      } else if (p.route) {
+        updateRoute(p);
+      } else if (activePlayerControl()) {
+        const d = held.down
+          ? 0
+          : held.left
+            ? 1
+            : held.right
+              ? 2
+              : held.up
+                ? 3
+                : -1;
+        if (d >= 0) {
+          p.dir = d;
+          const [dx, dy] = DIRD[d];
+          const nx = p.x + dx,
+            ny = p.y + dy;
+          const blocker = blockingEventAt(nx, ny);
+          if (
+            blocker &&
+            blocker.page.trigger === "touch" &&
+            blocker.page.commands.length
+          ) {
+            runEventBlocking(blocker);
+          } else if (tilePassable(nx, ny) && !blocker) {
+            startMove(p, d);
+            p.animT = p.animT || 0;
+          }
+        }
+        if (okTriggered) checkActionTrigger();
+        if (cancelTriggered) {
+          cancelTriggered = false;
+          okTriggered = false;
+          openMenu();
+        }
       }
     }
     okTriggered = false;
     cancelTriggered = false;
-    if (p.moving) p.animT = (p.animT || 0) + 0; // animT advanced in motion fn
+
 
     // events
     for (const rt of evRTs) {
@@ -1229,16 +1461,32 @@ const _createMessageSystem = window.createMessageSystem;
     }
     const viewW = SCREEN_W / cameraZoom,
       viewH = SCREEN_H / cameraZoom;
-    const camX = clamp(
+    const targetCamX = clamp(
       p.rx * TILE + TILE / 2 - viewW / 2,
       0,
       Math.max(0, map.width * TILE - viewW),
     );
-    const camY = clamp(
+    const targetCamY = clamp(
       p.ry * TILE + TILE / 2 - viewH / 2,
       0,
       Math.max(0, map.height * TILE - viewH),
     );
+
+    // Smooth camera follow (configurable via map.hd2d.cameraSmooth, 0=instant)
+    const smoothFactor = (map && map.hd2d && map.hd2d.cameraSmooth) || 0;
+    let camX, camY;
+    if (smoothFactor > 0.001) {
+      if (!_camInitialized) { _camSmoothX = targetCamX; _camSmoothY = targetCamY; _camInitialized = true; }
+      _camSmoothX += (targetCamX - _camSmoothX) * Math.min(1, smoothFactor);
+      _camSmoothY += (targetCamY - _camSmoothY) * Math.min(1, smoothFactor);
+      camX = _camSmoothX;
+      camY = _camSmoothY;
+    } else {
+      _camSmoothX = targetCamX;
+      _camSmoothY = targetCamY;
+      camX = targetCamX;
+      camY = targetCamY;
+    }
     const drawables = [];
     for (const rt of evRTs) {
       if (rt.erased || !rt.page || rt.charsetIdx < 0) continue;
@@ -1283,20 +1531,71 @@ const _createMessageSystem = window.createMessageSystem;
       if (map.lights) {
         for (const l of map.lights) lights.push(l);
       }
+      // Partículas de eventos
+      const particles = [];
+      for (const rt of evRTs) {
+        if (rt.particle && !rt.erased && rt.page) {
+          particles.push({
+            id: "ev_" + rt.ev.id,
+            x: rt.rx * TILE + TILE / 2,
+            y: 0,
+            z: rt.ry * TILE + TILE / 2,
+            kind: rt.particle.kind,
+            rate: rt.particle.rate,
+            tint: rt.particle.color ? parseInt(rt.particle.color.slice(1), 16) : 0xff8844,
+          });
+        }
+      }
+      // Partículas do mapa
+      if (map.particles) {
+        for (const mp of map.particles) {
+          particles.push({
+            id: "map_" + mp.id,
+            x: mp.x, y: mp.y || 0, z: mp.z,
+            kind: mp.kind || "fire",
+            rate: mp.rate || 10,
+            tint: mp.tint ? parseInt(String(mp.tint).replace("#", ""), 16) : 0xff8844,
+          });
+        }
+      }
+
       const ambient =
         map.hd2d && map.hd2d.ambient != null ? Number(map.hd2d.ambient) : 0.45;
+      const flashIntensity = flashTimer > 0 ? flashOpacity * (flashTimer / (flashDuration || 15)) : 0;
       await Renderer.renderFrame(SCREEN_W, SCREEN_H, camX, camY, sprites, {
         focus: { rx: p.rx, ry: p.ry },
         lights,
+        particles,
         zoom: cameraZoom,
         shakeX,
         shakeY,
         ambient,
         tilePassable,
+        tilt: map.hd2d ? map.hd2d.tilt : undefined,
+        fov: map.hd2d ? map.hd2d.fov : undefined,
+        flashIntensity,
+        flashColor,
       });
     }
 
-    if (!hdActive) {
+    if (map.gridFree) {
+      ctx.save();
+      ctx.translate(Math.round(shakeX), Math.round(shakeY));
+      ctx.scale(cameraZoom, cameraZoom);
+      for (const ln of ["ground", "decor", "decor2"]) {
+        renderTilePlacements(ctx, map.tilePlacements[ln] || [], camX, camY, viewW, viewH);
+      }
+      for (const d of drawables) {
+        const idx = d === p ? p.charsetIdx : d.charsetIdx;
+        Assets.drawChar(
+          ctx, idx, d.dir, walkFrame(d),
+          Math.round(d.rx * TILE - camX),
+          Math.round(d.ry * TILE - 8 - camY),
+        );
+      }
+      renderTilePlacements(ctx, map.tilePlacements["over"] || [], camX, camY, viewW, viewH);
+      ctx.restore();
+    } else if (!hdActive) {
       ctx.save();
       ctx.translate(Math.round(shakeX), Math.round(shakeY));
       ctx.scale(cameraZoom, cameraZoom);
@@ -2816,6 +3115,24 @@ const _createMessageSystem = window.createMessageSystem;
       charsetIdx: 0,
       page: null,
     };
+    // Continuous/pixel properties (used when pixelMovement is enabled).
+    const tileSize = TILE || 48;
+    G.player.px = G.player.x * tileSize;
+    G.player.py = G.player.y * tileSize;
+    G.player.bounds = { type: "box", w: 24, h: 32, ox: 12, oy: 16 };
+    G.player.body = {
+      x: G.player.px + (tileSize - G.player.bounds.w) / 2,
+      y: G.player.py + (tileSize - G.player.bounds.h),
+      w: G.player.bounds.w,
+      h: G.player.bounds.h,
+      type: "kinematic",
+    };
+    try {
+      if (physicsWorld && physicsWorld.addDynamic)
+        physicsWorld.addDynamic(G.player.body);
+    } catch (e) {
+      console.error("Failed to register player in physicsWorld:", e);
+    }
     refreshPlayerCharset();
   }
   function refreshPlayerCharset() {

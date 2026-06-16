@@ -109,6 +109,11 @@ input:focus, select:focus, textarea:focus { outline: 1px solid var(--gold-edge);
 #maplist li.sel { background: var(--accent); color: #fff; }
 #palettewrap { max-height: 420px; overflow-y: auto; border: 1px solid #2c2f44; border-radius: 4px; }
 #palette { display: block; cursor: pointer; image-rendering: pixelated; }
+.pal-tabs { display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: 4px; }
+.pal-tab { font-size: 10px; padding: 2px 6px; background: #2a2d40; border: 1px solid #3c3f58; border-radius: 3px; color: #aeb2c8; cursor: pointer; }
+.pal-tab.sel { background: var(--accent); color: #fff; border-color: var(--accent); }
+#props-section { font-size: 12px; color: #c8cce0; line-height: 1.6; }
+#props-section .side-head { margin-bottom: 2px; }
 
 #mapscroll { flex: 1; overflow: auto; background: #101018; padding: 14px; }
 #mapcanvas { display: block; image-rendering: pixelated; cursor: crosshair; box-shadow: 0 0 0 1px #30334a, 0 8px 30px rgba(0,0,0,0.5); }
