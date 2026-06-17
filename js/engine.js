@@ -409,16 +409,6 @@ const _createMessageSystem = window.createMessageSystem;
   const hdOverride = new URLSearchParams(location.search).get("hd2d");
   function hdWanted() {
     if (hdOverride === "1") return true;
-    if (hdOverride === "0") return false;
-    if (!map) return false;
-    if (map.hd2d && map.hd2d.enabled) return true;
-    if (
-      map.hd2d &&
-      (map.hd2d.lights || map.hd2d.tilt != null || map.hd2d.ambient != null)
-    )
-      return true;
-    if (map.lights && map.lights.length > 0) return true;
-    if (map.particles && map.particles.length > 0) return true;
     return false;
   }
   let evRTs = [];
@@ -426,6 +416,14 @@ const _createMessageSystem = window.createMessageSystem;
   const parallels = new Map(); // evRT -> running flag
 
   function tileAt(layer, x, y) {
+    if (map.data) {
+      var li = 0;
+      if (layer === "ground") li = 0;
+      else if (layer === "decor") li = 1;
+      else if (layer === "decor2") li = 2;
+      else if (layer === "over") li = 3;
+      return map.data[(y * map.width + x) * 4 + li] || 0;
+    }
     return map.layers[layer][y * map.width + x];
   }
   function tilePassable(x, y) {
@@ -436,13 +434,28 @@ const _createMessageSystem = window.createMessageSystem;
     const ov = map.passOv ? map.passOv[y * map.width + x] : 0;
     if (ov === 1) return true;
     if (ov === 2) return false;
-    const d2 = tileAt("decor2", x, y);
-    if (d2 !== 0) return Assets.tiles[d2] ? Assets.tiles[d2].pass : false;
-    const d = tileAt("decor", x, y);
-    if (d !== 0) return Assets.tiles[d] ? Assets.tiles[d].pass : false;
-    const g = tileAt("ground", x, y);
-    if (g === 0) return false;
-    return Assets.tiles[g] ? Assets.tiles[g].pass : false;
+    // Check layers bottom-up
+    for (var li = 2; li >= 0; li--) {
+      var tid = tileAt(["ground","decor","decor2"][li], x, y);
+      if (tid === 0) continue;
+      // RMMV tile ID: decode flags from tileset
+      if (tid >= 2048 && typeof Assets.getRmmvTileFlags === "function") {
+        var f = Assets.getRmmvTileFlags(tid);
+        if (f != null) {
+          // RMMV passage: autotile anim (bit 4) → always passable
+          if (f & 0x0010) return true;
+          // Terrain tag 0x0F → star passage
+          if ((f & 0x000F) === 0x000F) return true;
+          // Any direction blocker → ×
+          if (f & 0x0F00) return false;
+          // No blockers → ○
+          return true;
+        }
+      }
+      // Legacy: use Assets.tiles[id].pass
+      if (Assets.tiles[tid] && !Assets.tiles[tid].pass) return false;
+    }
+    return true;
   }
   function pageActive(evId, page) {
     const c = page.cond;

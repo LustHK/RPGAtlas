@@ -5,6 +5,42 @@
 export function getPatchNotes(t) {
   return [
    {
+      date: "June 17, 2026",
+      title: t("patch_notes.title.35"),
+      summary: t("patch_notes.summary.35"),
+      items: [
+        t("patch_notes.item.35.1"),
+        t("patch_notes.item.35.2"),
+        t("patch_notes.item.35.3"),
+        t("patch_notes.item.35.4"),
+      ],
+   },
+   {
+      date: "June 17, 2026",
+      title: t("patch_notes.title.34"),
+      summary: t("patch_notes.summary.34"),
+      items: [
+        t("patch_notes.item.34.1"),
+        t("patch_notes.item.34.2"),
+        t("patch_notes.item.34.3"),
+        t("patch_notes.item.34.4"),
+        t("patch_notes.item.34.5"),
+      ],
+   },
+   {
+      date: "June 17, 2026",
+      title: t("patch_notes.title.33"),
+      summary: t("patch_notes.summary.33"),
+      items: [
+        t("patch_notes.item.33.1"),
+        t("patch_notes.item.33.2"),
+        t("patch_notes.item.33.3"),
+        t("patch_notes.item.33.4"),
+        t("patch_notes.item.33.5"),
+        t("patch_notes.item.33.6"),
+      ],
+   },
+   {
       date: "June 16, 2026",
       title: t("patch_notes.title.0"),
       summary: t("patch_notes.summary.0"),

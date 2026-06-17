@@ -33,7 +33,7 @@ const Assets = (() => {
           kindCols: 16, kindRows: 16, kindW: 1, kindH: 1, autotile: false,      desc: t("asset.object_tiles") },
   };
   // MZ tileset name pattern: TileA1.png, TileA2.png, ..., Shop_Outside_TileA2.png, etc.
-  const MZ_TILESET_RE = /^(?:.+_)?Tile(A[1-5]|[B-E])\.png$/i;
+  const MZ_TILESET_RE = /^(?:.+_)?Tile(A[1-5]|[B-E])(?:\.png)?$/i;
   const tilesets = {}; // Assets.tilesets registry (populated at runtime)
   const ICON_SIZE = 32;
   const ICON_COLS = 8;
@@ -169,13 +169,14 @@ const Assets = (() => {
   }
 
   // ---------- tile flags (32-bit per tile) ----------
-  // Bit layout: 0-1=passage, 2-5=directional(N,S,E,W), 6=ladder, 7=bush,
-  //             8=counter, 9=damageFloor, 10-12=terrainTag(0-7), 13-31=reserved
+  // Legacy RPGAtlas bit layout (used for old-format tiles):
+  //   0-1=passage, 2-5=directional, 6=ladder, 7=bush,
+  //   8=counter, 9=damageFloor, 10-12=terrainTag
   const TF_PASS_SHIFT = 0;
   const TF_PASS_MASK  = 0x0003;
-  const TF_PASS_O     = 0; // passable
-  const TF_PASS_X     = 1; // blocked
-  const TF_PASS_STAR  = 2; // star (pass only from same layer)
+  const TF_PASS_O     = 0;
+  const TF_PASS_X     = 1;
+  const TF_PASS_STAR  = 2;
   const TF_DIR_N      = 0x0004;
   const TF_DIR_S      = 0x0008;
   const TF_DIR_E      = 0x0010;
@@ -187,9 +188,9 @@ const Assets = (() => {
   const TF_DAMAGE     = 0x0200;
   const TF_TERRAIN_SHIFT = 10;
   const TF_TERRAIN_MASK  = 0x1C00;
-  const TF_PASS_DEFAULT  = 0xFFFFFFFF; // sentinel: use tile default
+  const TF_PASS_DEFAULT  = 0xFFFFFFFF;
 
-  const tileFlags = {}; // tilesetKey -> Uint32Array or plain array of flag values
+  const tileFlags = {};
 
   function initTileFlags(tilesetKey, count) {
     const arr = new Uint32Array(count);
@@ -225,6 +226,52 @@ const Assets = (() => {
       if (!project.tilesets[tsKey]) continue;
       project.tilesets[tsKey].tileFlags = exportTileFlags(tsKey);
     }
+  }
+
+  // ---- RMMV tile flag lookup (reads from project's Tilesets[]) ----
+  // These work with tile IDs >= 2048, reading flags from the tileset's flags[]
+  var _projRef = null; // set by editor to reference the current project
+  function setRmmvProjectRef(p) { _projRef = p; }
+  function getRmmvTileFlags(tileId) {
+    if (tileId < 2048 || !_projRef || !_projRef.tilesets) return null;
+    // Find the tileset that contains this tile ID
+    var tsArr = _projRef.tilesets;
+    for (var tsi = 1; tsi < tsArr.length; tsi++) {
+      var ts = tsArr[tsi];
+      if (!ts || !ts.flags) continue;
+      var idx = tileId - 2048;
+      if (idx >= 0 && idx < ts.flags.length) {
+        return ts.flags[idx];
+      }
+    }
+    return null;
+  }
+  function setRmmvTileFlags(tileId, value) {
+    if (tileId < 2048 || !_projRef || !_projRef.tilesets) return;
+    var tsArr = _projRef.tilesets;
+    for (var tsi = 1; tsi < tsArr.length; tsi++) {
+      var ts = tsArr[tsi];
+      if (!ts || !ts.flags) continue;
+      var idx = tileId - 2048;
+      if (idx >= 0 && idx < ts.flags.length) {
+        ts.flags[idx] = value;
+        return;
+      }
+    }
+  }
+
+  // High-level: get flags for any tile ID, RMMV or legacy.
+  // For legacy tiles (<2048), uses old tileFlags + tilesetKey lookup.
+  // For RMMV tiles (>=2048), reads from project tileset data.
+  function getFlagsForTileId(tileId, tilesetKey, subIdx) {
+    if (tileId >= 2048) {
+      var rv = getRmmvTileFlags(tileId);
+      if (rv != null) return rv;
+    }
+    if (tilesetKey != null && subIdx != null) {
+      return getTileFlags(tilesetKey, subIdx);
+    }
+    return 0;
   }
 
   // ---------- autotile system (Phase 3) ----------
@@ -853,18 +900,73 @@ const Assets = (() => {
   ]);
   tiles.forEach((t) => { t.terrain = TERRAIN_KEYS.has(t.key); });
 
+  // RMMV tilesheet cache: slotName → HTMLImageElement
+  const rmmvSheets = {};
+  const rmmvSheetLoaders = {};
+  function loadRmmvSheet(slotName) {
+    if (rmmvSheets[slotName]) return rmmvSheets[slotName];
+    if (rmmvSheetLoaders[slotName]) return null;
+    rmmvSheetLoaders[slotName] = true;
+    const name = slotName === "A1" ? "TileA1" :
+      slotName === "A2" ? "TileA2" :
+      slotName === "A3" ? "TileA3" :
+      slotName === "A4" ? "TileA4" :
+      slotName === "A5" ? "TileA5" :
+      "Tile" + slotName;
+    var img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = function() {
+      rmmvSheets[slotName] = img;
+      // Invalidate tile cache so re-render picks up the image
+      for (var key in tileCache) { delete tileCache[key]; }
+      if (typeof renderMap === "function") renderMap();
+    };
+    img.onerror = function() { console.warn("Could not load tilesheet: " + img.src); };
+    img.src = "img/tilesets/" + name + ".png";
+    return null;
+  }
+  function getRmmvSheet(slotName) {
+    return rmmvSheets[slotName] || null;
+  }
   // pre-render each tile once (seed fixed per id) for palette + fast map blits
   const tileCache = [];
   function tileCanvas(id) {
     if (!tileCache[id]) {
+      if (id >= 2048) {
+        const d = (typeof decodeTileId === "function") ? decodeTileId(id) : null;
+        if (!d) { tileCache[id] = mkCanvas(TILE, TILE); return tileCache[id]; }
+        loadRmmvSheet(d.slotName);
+        const c = mkCanvas(TILE, TILE), g = c.getContext("2d");
+        const img = getRmmvSheet(d.slotName);
+        if (img) {
+          const col = d.subPos % 8, row = Math.floor(d.subPos / 8);
+          g.imageSmoothingEnabled = false;
+          g.drawImage(img, col * TILE, row * TILE, TILE, TILE, 0, 0, TILE, TILE);
+        }
+        tileCache[id] = c;
+        return c;
+      }
       const c = mkCanvas(TILE, TILE), g = c.getContext("2d");
-      if (id !== T.empty) { tiles[id].draw(g, rng(id * 7919 + 17)); }
+      const tile = tiles[id];
+      if (id !== T.empty && tile) { tile.draw(g, rng(id * 7919 + 17)); }
       tileCache[id] = c;
     }
     return tileCache[id];
   }
   function drawTile(ctx, id, dx, dy) {
-    if (id <= 0 || id >= tiles.length || !tiles[id]) return;
+    if (id <= 0) return;
+    if (id >= 2048) {
+      if (typeof decodeTileId !== "function") return;
+      const d = decodeTileId(id);
+      if (!d) return;
+      const img = getRmmvSheet(d.slotName);
+      if (!img) { loadRmmvSheet(d.slotName); return; }
+      const col = d.subPos % 8, row = Math.floor(d.subPos / 8);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, col * TILE, row * TILE, TILE, TILE, dx, dy, TILE, TILE);
+      return;
+    }
+    if (id >= tiles.length || !tiles[id]) return;
     ctx.drawImage(tileCanvas(id), dx, dy);
   }
   function tilesetCanvas() {
@@ -1623,7 +1725,7 @@ const Assets = (() => {
     TF_PASS_O, TF_PASS_X, TF_PASS_STAR,
     TF_DIR_N, TF_DIR_S, TF_DIR_E, TF_DIR_W,
     TF_LADDER, TF_BUSH, TF_COUNTER, TF_DAMAGE,
-    TF_PASS_MASK, TF_DIR_MASK, TF_TERRAIN_MASK, TF_PASS_DEFAULT,
+    TF_PASS_MASK, TF_DIR_MASK, TF_TERRAIN_MASK, TF_TERRAIN_SHIFT, TF_PASS_DEFAULT,
     tileFlags,
     getTileFlags, setTileFlags,
     loadTileFlags, exportTileFlags, syncTileFlagsToProject,

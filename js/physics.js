@@ -77,6 +77,18 @@
       }
       return tile.pass === false;
     }
+    function rmmvTileIsBlocked(tileId) {
+      if (tileId < 2048 || typeof assets.getRmmvTileFlags !== "function") return false;
+      var f = assets.getRmmvTileFlags(tileId);
+      if (f == null) return false;
+      // Autotile anim (bit 4) → passable
+      if (f & 0x0010) return false;
+      // Terrain tag 0x0F → star (passable)
+      if ((f & 0x000F) === 0x000F) return false;
+      // Any direction blocker → blocked
+      if (f & 0x0F00) return true;
+      return false;
+    }
     if (map.gridFree && map.tilePlacements) {
       const layers = ["ground", "decor", "decor2", "over"];
       for (const ln of layers) {
@@ -144,87 +156,40 @@
           continue;
         }
         // check decor2, decor, ground in order like engine.tilePassable
-        const d2 = map.layers.decor2 && map.layers.decor2[idx];
-        if (
-          d2 &&
-          assets.tiles &&
-          assets.tiles[d2] &&
-          tileIsBlocked(assets.tiles[d2])
-        ) {
-          const def = assets.tiles[d2];
-          if (def.collision && def.collision.type === "box") {
-            const c = def.collision;
-            world.tileBodies.push({
-              x: tx * tileSize + (c.x || 0),
-              y: ty * tileSize + (c.y || 0),
-              w: c.w || tileSize,
-              h: c.h || tileSize,
-            });
-          } else {
-            world.tileBodies.push({
-              x: tx * tileSize,
-              y: ty * tileSize,
-              w: tileSize,
-              h: tileSize,
-            });
-          }
-          continue;
+        function checkTileBody(tid) {
+          if (tid >= 2048) return rmmvTileIsBlocked(tid);
+          if (assets.tiles && assets.tiles[tid]) return tileIsBlocked(assets.tiles[tid]);
+          return false;
         }
-        const d = map.layers.decor && map.layers.decor[idx];
-        if (
-          d &&
-          assets.tiles &&
-          assets.tiles[d] &&
-          tileIsBlocked(assets.tiles[d])
-        ) {
-          const def = assets.tiles[d];
-          if (def.collision && def.collision.type === "box") {
-            const c = def.collision;
-            world.tileBodies.push({
-              x: tx * tileSize + (c.x || 0),
-              y: ty * tileSize + (c.y || 0),
-              w: c.w || tileSize,
-              h: c.h || tileSize,
-            });
-          } else {
-            world.tileBodies.push({
-              x: tx * tileSize,
-              y: ty * tileSize,
-              w: tileSize,
-              h: tileSize,
-            });
-          }
-          continue;
-        }
-        const g = map.layers.ground && map.layers.ground[idx];
-        if (!g) {
-          // empty ground = non-passable by original engine semantics
+        var d2 = map.data ? map.data[idx * 4 + 2] : (map.layers.decor2 && map.layers.decor2[idx]);
+        if (d2 && checkTileBody(d2)) {
           world.tileBodies.push({
-            x: tx * tileSize,
-            y: ty * tileSize,
-            w: tileSize,
-            h: tileSize,
+            x: tx * tileSize, y: ty * tileSize,
+            w: tileSize, h: tileSize,
           });
           continue;
         }
-        if (assets.tiles && assets.tiles[g] && tileIsBlocked(assets.tiles[g])) {
-          const def = assets.tiles[g];
-          if (def.collision && def.collision.type === "box") {
-            const c = def.collision;
-            world.tileBodies.push({
-              x: tx * tileSize + (c.x || 0),
-              y: ty * tileSize + (c.y || 0),
-              w: c.w || tileSize,
-              h: c.h || tileSize,
-            });
-          } else {
-            world.tileBodies.push({
-              x: tx * tileSize,
-              y: ty * tileSize,
-              w: tileSize,
-              h: tileSize,
-            });
-          }
+        var d = map.data ? map.data[idx * 4 + 1] : (map.layers.decor && map.layers.decor[idx]);
+        if (d && checkTileBody(d)) {
+          world.tileBodies.push({
+            x: tx * tileSize, y: ty * tileSize,
+            w: tileSize, h: tileSize,
+          });
+          continue;
+        }
+        var g = map.data ? map.data[idx * 4] : (map.layers.ground && map.layers.ground[idx]);
+        if (!g) {
+          world.tileBodies.push({
+            x: tx * tileSize, y: ty * tileSize,
+            w: tileSize, h: tileSize,
+          });
+          continue;
+        }
+        if (checkTileBody(g)) {
+          world.tileBodies.push({
+            x: tx * tileSize, y: ty * tileSize,
+            w: tileSize, h: tileSize,
+          });
           continue;
         }
       }

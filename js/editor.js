@@ -14,11 +14,13 @@ import {
 } from "./editor/project-io.js";
 import {
   createNewProject,
+  defaultProjectData,
   sanitizeProjectName,
 } from "./editor/project-generator.js";
 import * as host from "./editor/host.js";
 const { create: createEditorI18n } = window.RPGAtlasI18n;
 import { getPatchNotes } from "./patch-notes.js";
+import { buildTilesetTab } from "./editor/tileset-editor.js";
 
 const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } =
   window.RPGAtlasDeps;
@@ -39,6 +41,33 @@ const editorI18n = await createEditorI18n({
     decor2: "layer.decor2",
     over: "layer.over",
   };
+
+  // Helper: read tile ID from map data (RMMV data[] or legacy layers[])
+  function mapTileId(m, x, y, layerIdx) {
+    if (m.data) {
+      const i = (y * m.width + x) * 4 + layerIdx;
+      if (i >= 0 && i < m.data.length) return m.data[i] || 0;
+      return 0;
+    }
+    const ln = LAYER_ORDER[layerIdx];
+    const arr = m.layers && m.layers[ln];
+    if (!arr) return 0;
+    const i = y * m.width + x;
+    return i < arr.length ? (arr[i] || 0) : 0;
+  }
+
+  function setMapTileId(m, x, y, layerIdx, tileId) {
+    if (m.data) {
+      const i = (y * m.width + x) * 4 + layerIdx;
+      if (i >= 0 && i < m.data.length) m.data[i] = tileId;
+      return;
+    }
+    const ln = LAYER_ORDER[layerIdx];
+    const arr = m.layers && m.layers[ln];
+    if (!arr) return;
+    const i = y * m.width + x;
+    if (i < arr.length) arr[i] = tileId;
+  }
   const TOOL_LABELS = {
     pen: "tool.pen",
     erase: "tool.eraser",
@@ -512,6 +541,7 @@ const editorI18n = await createEditorI18n({
         )
           throw new Error("Not an RPGAtlas project file.");
         proj = RA.migrateProject(p);
+        if (typeof Assets.setRmmvProjectRef === "function") Assets.setRmmvProjectRef(proj);
         Assets.registerCustomChars(proj.customChars);
         await Assets.loadExternalAssets(proj);
         curMapId = proj.maps[0].id;
@@ -541,6 +571,7 @@ const editorI18n = await createEditorI18n({
 
   function resetProject(project) {
     proj = project;
+    if (typeof Assets.setRmmvProjectRef === "function") Assets.setRmmvProjectRef(proj);
     Assets.registerCustomChars(proj.customChars);
     Assets.bindExternalAssets(proj);
     if (proj.maps && proj.maps.length) curMapId = proj.maps[0].id;
@@ -551,6 +582,39 @@ const editorI18n = await createEditorI18n({
     redoStack.length = 0;
     rebuildAll();
     touch();
+  }
+
+  async function pickFolderAnywhere() {
+    if (host.isTauri) {
+      const path = await host.pickFolder();
+      if (!path) return null;
+      return { path };
+    }
+    if (typeof window.showDirectoryPicker === "function") {
+      const handle = await window.showDirectoryPicker({ mode: "readwrite" });
+      return { handle, path: handle.name };
+    }
+    return null;
+  }
+
+  async function writeProjectToHandle(handle, proj) {
+    const dataHandle = await handle.getDirectoryHandle("data", { create: true });
+    const files = {
+      "System.json": { meta: proj.meta, system: proj.system, plugins: proj.plugins || [] },
+      "MapInfos.json": (proj.maps || []).map((m) => ({
+        id: m.id, name: m.name, parentId: 0, order: 1,
+      })),
+    };
+    for (let i = 0; i < (proj.maps || []).length; i++) {
+      const m = proj.maps[i];
+      files[`Map${String(m.id).padStart(3, "0")}.json`] = m;
+    }
+    for (const [name, data] of Object.entries(files)) {
+      const fh = await dataHandle.getFileHandle(name, { create: true });
+      const w = await fh.createWritable();
+      await w.write(JSON.stringify(data, null, 1));
+      await w.close();
+    }
   }
 
   async function openNewProjectDialog() {
@@ -566,11 +630,11 @@ const editorI18n = await createEditorI18n({
       placeholder: "My RPG Game",
       value: "Untitled RPG",
     });
+
     const destInput = h("input", {
       id: "new-proj-dest",
       type: "text",
-      readonly: true,
-      placeholder: "Select a folder…",
+      placeholder: "~/my-games/",
     });
     const browseBtn = h(
       "button",
@@ -579,22 +643,31 @@ const editorI18n = await createEditorI18n({
     );
 
     let selectedDest = null;
+    let selectedHandle = null;
+
     browseBtn.addEventListener("click", async () => {
-      const folder = await host.pickFolder();
-      if (folder) {
-        selectedDest = folder;
-        destInput.value = folder;
+      const result = await pickFolderAnywhere();
+      if (result) {
+        selectedDest = result.path;
+        selectedHandle = result.handle || null;
+        destInput.value = result.path;
+      } else if (!host.isTauri && typeof window.showDirectoryPicker !== "function") {
+        flashStatus("Folder picker requires Chrome/Edge. Type the path manually — project will be created in memory.");
       }
+    });
+    destInput.addEventListener("input", () => {
+      selectedDest = destInput.value.trim() || null;
+      selectedHandle = null;
     });
 
     const content = h(
       "div",
       { class: "new-proj-form" },
-      h("label", null, t("dialog.new_project_name") || "Project Name:"),
+      h("label", { for: "new-proj-name" }, t("dialog.new_project_name") || "Project Name:"),
       nameInput,
-      h("label", null, t("dialog.new_project_title") || "Game Title:"),
+      h("label", { for: "new-proj-title" }, t("dialog.new_project_title") || "Game Title:"),
       titleInput,
-      h("label", null, t("dialog.new_project_destination") || "Destination:"),
+      h("label", { for: "new-proj-dest" }, t("dialog.new_project_destination") || "Destination:"),
       h("div", { class: "folder-picker-row" }, destInput, browseBtn),
     );
 
@@ -608,10 +681,6 @@ const editorI18n = await createEditorI18n({
           onClick: async (close) => {
             const projName = nameInput.value.trim();
             const gameTitle = titleInput.value.trim() || projName;
-            if (!selectedDest) {
-              alert("Please select a destination folder.");
-              return;
-            }
             if (!projName) {
               alert("Please enter a project name.");
               return;
@@ -619,33 +688,58 @@ const editorI18n = await createEditorI18n({
 
             close();
             flashStatus("Creating project…");
-            const result = await createNewProject(
-              projName,
-              gameTitle,
-              selectedDest,
-            );
-            if (!result.success) {
-              alert("Failed to create project: " + result.error);
-              flashStatus(t("status.ready"));
-              return;
-            }
 
-            if (result.project) {
-              setProjectFolderPath(result.path);
-              resetProject(result.project);
-              flashStatus(
-                t("status.project_created", { path: result.path }) ||
-                  "Project created at " + result.path,
+            if (host.isTauri) {
+              if (!selectedDest) {
+                alert("Please select a destination folder.");
+                flashStatus(t("status.ready"));
+                return;
+              }
+              const result = await createNewProject(
+                projName,
+                gameTitle,
+                selectedDest,
               );
-            } else if (host.isTauri && result.path) {
-              const loaded = await host.loadProjectFromFolder(result.path);
-              if (loaded) {
+              if (!result.success) {
+                alert("Failed to create project: " + result.error);
+                flashStatus(t("status.ready"));
+                return;
+              }
+              if (result.project) {
                 setProjectFolderPath(result.path);
-                resetProject(loaded);
+                resetProject(result.project);
                 flashStatus(
                   t("status.project_created", { path: result.path }) ||
                     "Project created at " + result.path,
                 );
+              } else if (result.path) {
+                const loaded = await host.loadProjectFromFolder(result.path);
+                if (loaded) {
+                  setProjectFolderPath(result.path);
+                  resetProject(loaded);
+                  flashStatus(
+                    t("status.project_created", { path: result.path }) ||
+                      "Project created at " + result.path,
+                  );
+                }
+              }
+            } else {
+              if (selectedHandle) {
+                const proj = defaultProjectData();
+                proj.system.title = gameTitle;
+                try {
+                  await writeProjectToHandle(selectedHandle, proj);
+                  resetProject(proj);
+                  flashStatus("Project saved to " + selectedDest);
+                } catch (e) {
+                  resetProject(proj);
+                  flashStatus("Project created in memory (could not write to folder: " + e.message + ")");
+                }
+              } else {
+                const proj = defaultProjectData();
+                proj.system.title = gameTitle;
+                resetProject(proj);
+                flashStatus("New project created in memory.");
               }
             }
           },
@@ -710,37 +804,39 @@ const editorI18n = await createEditorI18n({
     return li > a ? 0.45 : 1;
   }
   function effectivePass(x, y) {
-    const m = curMap(),
-      i = y * m.width + x;
-    const ov = m.passOv[i];
+    const m = curMap();
+    const ov = m.passOv ? m.passOv[y * m.width + x] : 0;
     if (ov === 1) return true;
     if (ov === 2) return false;
-    for (const ln of ["decor2", "decor"]) {
-      const t = m.layers[ln][i];
+    for (let li = 2; li >= 1; li--) {
+      const t = mapTileId(m, x, y, li);
       if (t) return Assets.tiles[t] ? Assets.tiles[t].pass : false;
     }
-    const t = m.layers.ground[i];
+    const t = mapTileId(m, x, y, 0);
     return t && Assets.tiles[t] ? Assets.tiles[t].pass : false;
   }
   function drawShadows(g, m) {
     const H = TILE / 2;
     g.fillStyle = "rgba(10,10,26,0.35)";
-    for (let y = 0; y < m.height; y++) {
-      for (let x = 0; x < m.width; x++) {
-        const mask = m.shadows[y * m.width + x];
-        if (!mask) continue;
-        if (mask & 1) g.fillRect(x * TILE, y * TILE, H, H);
-        if (mask & 2) g.fillRect(x * TILE + H, y * TILE, H, H);
-        if (mask & 4) g.fillRect(x * TILE, y * TILE + H, H, H);
-        if (mask & 8) g.fillRect(x * TILE + H, y * TILE + H, H, H);
+    if (m.shadows) {
+      for (let y = 0; y < m.height; y++) {
+        for (let x = 0; x < m.width; x++) {
+          const mask = m.shadows[y * m.width + x];
+          if (!mask) continue;
+          if (mask & 1) g.fillRect(x * TILE, y * TILE, H, H);
+          if (mask & 2) g.fillRect(x * TILE + H, y * TILE, H, H);
+          if (mask & 4) g.fillRect(x * TILE, y * TILE + H, H, H);
+          if (mask & 8) g.fillRect(x * TILE + H, y * TILE + H, H, H);
+        }
       }
     }
   }
   function drawPassOverlay(g, m) {
+    const passOv = m.passOv || [];
     g.lineWidth = 3.5 / Math.max(zoom, 0.4);
     for (let y = 0; y < m.height; y++) {
       for (let x = 0; x < m.width; x++) {
-        const ov = m.passOv[y * m.width + x];
+        const ov = passOv[y * m.width + x] || 0;
         const cx = x * TILE + TILE / 2,
           cy = y * TILE + TILE / 2,
           r = TILE * 0.24;
@@ -867,7 +963,39 @@ const editorI18n = await createEditorI18n({
     if (!ts) return -1;
     return tile.tilesetY * ts.cols + tile.tilesetX;
   }
+  // Convert an RMMV flag value (bits 4=autotile, 8-11=direction, etc.)
+  // to the legacy RPGAtlas TF_* format so existing overlay code works.
+  function rmmvToLegacyFlag(rmmv) {
+    var out = 0;
+    // RMMV terrain tag 0x0F = star passage
+    if ((rmmv & 0x000F) === 0x0F) { out |= Assets.TF_PASS_STAR; }
+    else if (rmmv & RMMV_FLAGS.AUTOTILE_ANIM) { /* 0 = passable */ }
+    else if (rmmv & (RMMV_FLAGS.PASS_DOWN | RMMV_FLAGS.PASS_LEFT | RMMV_FLAGS.PASS_RIGHT | RMMV_FLAGS.PASS_UP)) {
+      out |= Assets.TF_PASS_X;
+    }
+    // Directional blockers
+    if (rmmv & RMMV_FLAGS.PASS_UP)    out |= Assets.TF_DIR_N;
+    if (rmmv & RMMV_FLAGS.PASS_DOWN)  out |= Assets.TF_DIR_S;
+    if (rmmv & RMMV_FLAGS.PASS_RIGHT) out |= Assets.TF_DIR_E;
+    if (rmmv & RMMV_FLAGS.PASS_LEFT)  out |= Assets.TF_DIR_W;
+    // Special flags
+    if (rmmv & RMMV_FLAGS.LADDER)  out |= Assets.TF_LADDER;
+    if (rmmv & RMMV_FLAGS.BUSH)    out |= Assets.TF_BUSH;
+    if (rmmv & RMMV_FLAGS.COUNTER) out |= Assets.TF_COUNTER;
+    // Terrain tag (low 4 bits, shifted to legacy position)
+    var tag = rmmv & RMMV_FLAGS.TERRAIN_TAG_MASK;
+    if (tag && (tag !== 0x0F)) { out |= (tag << Assets.TF_TERRAIN_SHIFT); }
+    return out;
+  }
+
   function flagsOfTile(tileId) {
+    if (!tileId) return 0;
+    // RMMV tile IDs (>=2048): look up from project tileset flags
+    if (tileId >= 2048 && typeof Assets.getRmmvTileFlags === "function") {
+      var v = Assets.getRmmvTileFlags(tileId);
+      if (v != null) return rmmvToLegacyFlag(v);
+    }
+    // Legacy lookup via Assets.tiles[]
     const tile = Assets.tiles[tileId];
     if (!tile || !tile.tileset) return 0;
     const si = tileSubIndex(tile);
@@ -973,41 +1101,82 @@ const editorI18n = await createEditorI18n({
   // ---- paint tile flags ----
   function paintFlags(cell, mask, value) {
     const m = curMap();
-    const placements = m.gridFree ? m.tilePlacements : null;
-    if (placements) {
-      const px = (cell.x + 0.5) * TILE;
-      const py = (cell.y + 0.5) * TILE;
-      const hit = placementAt(px, py);
-      if (!hit) return;
-      const tile = Assets.tiles[hit.placement.tileId];
-      if (!tile || !tile.tileset) return;
-      const si = tileSubIndex(tile);
-      if (si < 0) return;
-      let cur = Assets.getTileFlags(tile.tileset, si);
+    const ln = layer === "auto" ? topLayerAt(cell.x, cell.y) : layer;
+    const li = LAYER_ORDER.indexOf(ln);
+    const tid = mapTileId(m, cell.x, cell.y, li) || mapTileId(m, cell.x, cell.y, 0);
+    // RMMV tiles: write directly to project tileset flags
+    if (tid >= 2048 && typeof Assets.setRmmvTileFlags === "function") {
+      var cur = Assets.getRmmvTileFlags(tid);
+      if (cur == null) { touch(); renderMap(); return; }
       if (mask === 0xffffffff) {
         cur = value;
       } else {
-        cur = (cur & ~mask) | (value & mask);
+        var conv = legacyMaskToRmmv(mask, value, cur);
+        cur = (cur & ~conv.mask) | (conv.value & conv.mask);
       }
-      Assets.setTileFlags(tile.tileset, si, cur);
-    } else {
-      const ln = layer === "auto" ? topLayerAt(cell.x, cell.y) : layer;
-      const tid =
-        getCell(cell.x, cell.y, ln) || getCell(cell.x, cell.y, "ground");
-      const tile = Assets.tiles[tid];
-      if (!tile || !tile.tileset) return;
-      const si = tileSubIndex(tile);
-      if (si < 0) return;
-      let cur = Assets.getTileFlags(tile.tileset, si);
-      if (mask === 0xffffffff) {
-        cur = value;
-      } else {
-        cur = (cur & ~mask) | (value & mask);
-      }
-      Assets.setTileFlags(tile.tileset, si, cur);
+      Assets.setRmmvTileFlags(tid, cur);
+      touch();
+      renderMap();
+      return;
     }
+    // Legacy tiles
+    const tile = Assets.tiles[tid];
+    if (!tile || !tile.tileset) return;
+    const si = tileSubIndex(tile);
+    if (si < 0) return;
+    let cur = Assets.getTileFlags(tile.tileset, si);
+    if (mask === 0xffffffff) {
+      cur = value;
+    } else {
+      cur = (cur & ~mask) | (value & mask);
+    }
+    Assets.setTileFlags(tile.tileset, si, cur);
     touch();
     renderMap();
+  }
+
+  // Convert legacy TF_* bitmask to RMMV bitmask for flag painting.
+  // Also writes the chosen RMMV value for the passage (O/X/★) into rmmvOut.
+  function legacyMaskToRmmv(legacyMask, legacyVal, curRmmv) {
+    if (!curRmmv) curRmmv = 0;
+    var m = 0;
+    var v = 0;
+    // Passage mask (0x0003): special handling for O/X/★ → RMMV pass/dir bits
+    if (legacyMask & Assets.TF_PASS_MASK) {
+      var passVal = legacyVal & Assets.TF_PASS_MASK;
+      // Preserve existing direction blockers, only update passage semantics
+      var curDirs = curRmmv & RMMV_FLAGS.PASS_DIR_MASK;
+      if (passVal === Assets.TF_PASS_X) {
+        // × → block all directions
+        v |= RMMV_FLAGS.PASS_DOWN | RMMV_FLAGS.PASS_LEFT | RMMV_FLAGS.PASS_RIGHT | RMMV_FLAGS.PASS_UP;
+        v |= (curRmmv & ~(RMMV_FLAGS.PASS_DIR_MASK | RMMV_FLAGS.TERRAIN_TAG_MASK));
+      } else if (passVal === Assets.TF_PASS_STAR) {
+        // ★ → terrain tag 0x0F, clear all direction blockers
+        v = RMMV_FLAGS.TERRAIN_TAG_MASK; // 0x0F
+        v |= (curRmmv & ~(RMMV_FLAGS.PASS_DIR_MASK | RMMV_FLAGS.TERRAIN_TAG_MASK));
+      } else {
+        // ○ → clear terrain tag and all direction blockers, set bit 4 for autotile anim
+        v = RMMV_FLAGS.AUTOTILE_ANIM;
+        v |= (curRmmv & ~(RMMV_FLAGS.PASS_DIR_MASK | RMMV_FLAGS.TERRAIN_TAG_MASK | RMMV_FLAGS.AUTOTILE_ANIM));
+      }
+      m |= RMMV_FLAGS.PASS_DIR_MASK | RMMV_FLAGS.TERRAIN_TAG_MASK | RMMV_FLAGS.AUTOTILE_ANIM;
+    }
+    var result = { mask: m, value: v };
+    if (legacyMask & Assets.TF_DIR_N) { result.mask |= RMMV_FLAGS.PASS_UP; if (legacyVal & Assets.TF_DIR_N) result.value |= RMMV_FLAGS.PASS_UP; }
+    if (legacyMask & Assets.TF_DIR_S) { result.mask |= RMMV_FLAGS.PASS_DOWN; if (legacyVal & Assets.TF_DIR_S) result.value |= RMMV_FLAGS.PASS_DOWN; }
+    if (legacyMask & Assets.TF_DIR_E) { result.mask |= RMMV_FLAGS.PASS_RIGHT; if (legacyVal & Assets.TF_DIR_E) result.value |= RMMV_FLAGS.PASS_RIGHT; }
+    if (legacyMask & Assets.TF_DIR_W) { result.mask |= RMMV_FLAGS.PASS_LEFT; if (legacyVal & Assets.TF_DIR_W) result.value |= RMMV_FLAGS.PASS_LEFT; }
+    if (legacyMask & Assets.TF_LADDER)  { result.mask |= RMMV_FLAGS.LADDER; if (legacyVal & Assets.TF_LADDER) result.value |= RMMV_FLAGS.LADDER; }
+    if (legacyMask & Assets.TF_BUSH)    { result.mask |= RMMV_FLAGS.BUSH; if (legacyVal & Assets.TF_BUSH) result.value |= RMMV_FLAGS.BUSH; }
+    if (legacyMask & Assets.TF_COUNTER) { result.mask |= RMMV_FLAGS.COUNTER; if (legacyVal & Assets.TF_COUNTER) result.value |= RMMV_FLAGS.COUNTER; }
+    if (legacyMask & Assets.TF_TERRAIN_MASK) {
+      result.mask |= RMMV_FLAGS.TERRAIN_TAG_MASK;
+      result.value |= (legacyVal & Assets.TF_TERRAIN_MASK) >> (Assets.TF_TERRAIN_SHIFT - 0);
+    }
+    if (legacyMask & Assets.TF_DAMAGE) {
+      // TF_DAMAGE has no RMMV equivalent — silently ignore
+    }
+    return result;
   }
 
   function renderMap() {
@@ -1133,20 +1302,18 @@ const editorI18n = await createEditorI18n({
           );
         }
       }
-      return; // skip legacy rendering below
+      return;
     }
-    // ---- legacy grid-based rendering ----
-    // tile layers (layers above the active one are dimmed while drawing)
+    // ---- grid-based rendering (supports RMMV data[] and legacy layers[]) ----
     for (let li = 0; li < LAYER_ORDER.length; li++) {
-      const arr = m.layers[LAYER_ORDER[li]];
       g.globalAlpha = layerAlpha(li);
       for (let y = 0; y < m.height; y++) {
         for (let x = 0; x < m.width; x++) {
-          Assets.drawTile(g, arr[y * m.width + x], x * TILE, y * TILE);
+          const tid = mapTileId(m, x, y, li);
+          if (tid) Assets.drawTile(g, tid, x * TILE, y * TILE);
         }
       }
       if (li === 2) {
-        // shadows sit under the overhead layer, as in-game
         g.globalAlpha = 1;
         drawShadows(g, m);
       }
@@ -1232,14 +1399,16 @@ const editorI18n = await createEditorI18n({
       g.globalAlpha = 0.6;
       for (let dy = 0; dy < clipTiles.h; dy++) {
         for (let dx = 0; dx < clipTiles.w; dx++) {
-          const si = dy * clipTiles.w + dx;
-          for (const ln of LAYER_ORDER)
-            Assets.drawTile(
-              g,
-              clipTiles.layers[ln][si],
-              (hoverCell.x + dx) * TILE,
-              (hoverCell.y + dy) * TILE,
-            );
+          if (clipTiles._rmmv) {
+            for (let li = 0; li < 4; li++) {
+              const si = (dy * clipTiles.w + dx) * 4 + li;
+              Assets.drawTile(g, clipTiles.data[si], (hoverCell.x + dx) * TILE, (hoverCell.y + dy) * TILE);
+            }
+          } else {
+            const si = dy * clipTiles.w + dx;
+            for (const ln of LAYER_ORDER)
+              Assets.drawTile(g, clipTiles.layers[ln][si], (hoverCell.x + dx) * TILE, (hoverCell.y + dy) * TILE);
+          }
         }
       }
       g.globalAlpha = 1;
@@ -1455,7 +1624,11 @@ const editorI18n = await createEditorI18n({
           for (const p of m.tilePlacements[ln] || []) usedIds.add(p.tileId);
         }
       }
-      if (m && m.layers) {
+      if (m && m.data) {
+        for (let i = 0; i < m.data.length; i++) {
+          if (m.data[i] > 0) usedIds.add(m.data[i]);
+        }
+      } else if (m && m.layers) {
         for (const ln of LAYER_ORDER) {
           for (let i = 0; i < m.width * m.height; i++) {
             if (m.layers[ln][i] > 0) usedIds.add(m.layers[ln][i]);
@@ -1617,29 +1790,35 @@ const editorI18n = await createEditorI18n({
   // ---- undo / redo (full map snapshots: tiles, shadows, passability, events, collision masks) ----
   function snapshotOf(mapId) {
     const m = RA.byId(proj.maps, mapId);
-    return {
-      mapId,
-      layers: RA.clone(m.layers),
-      shadows: m.shadows.slice(),
-      passOv: m.passOv.slice(),
-      heights: heightsOf(m).slice(),
-      events: RA.clone(m.events),
-      collision: m.collision ? RA.clone(m.collision) : null,
-      tilePlacements: RA.clone(m.tilePlacements),
-      gridFree: m.gridFree,
-    };
+    const s = { mapId, events: RA.clone(m.events) };
+    if (m.data) {
+      s.data = m.data.slice();
+    } else {
+      s.layers = RA.clone(m.layers);
+      s.shadows = m.shadows && m.shadows.slice();
+      s.passOv = m.passOv && m.passOv.slice();
+      s.heights = heightsOf(m).slice();
+      s.collision = m.collision ? RA.clone(m.collision) : null;
+      s.tilePlacements = RA.clone(m.tilePlacements);
+      s.gridFree = m.gridFree;
+    }
+    return s;
   }
   function applySnapshot(s) {
     const m = RA.byId(proj.maps, s.mapId);
     if (!m) return;
-    m.layers = s.layers;
-    m.shadows = s.shadows;
-    m.passOv = s.passOv;
-    m.heights = s.heights;
-    m.events = s.events;
-    if (s.collision) m.collision = s.collision;
-    if (s.tilePlacements) m.tilePlacements = s.tilePlacements;
-    if (s.gridFree != null) m.gridFree = s.gridFree;
+    if (s.data) {
+      m.data = s.data;
+    } else {
+      m.layers = s.layers;
+      if (s.shadows) m.shadows = s.shadows;
+      if (s.passOv) m.passOv = s.passOv;
+      if (s.heights) m.heights = s.heights;
+      m.events = s.events;
+      if (s.collision) m.collision = s.collision;
+      if (s.tilePlacements) m.tilePlacements = s.tilePlacements;
+      if (s.gridFree != null) m.gridFree = s.gridFree;
+    }
     if (curMapId !== s.mapId) {
       curMapId = s.mapId;
       rebuildMapList();
@@ -1680,17 +1859,22 @@ const editorI18n = await createEditorI18n({
   // ---- layer resolution ----
   function setCell(x, y, t, ln) {
     const m = curMap();
-    m.layers[ln][y * m.width + x] = t;
+    const li = LAYER_ORDER.indexOf(ln);
+    if (li < 0) return;
+    setMapTileId(m, x, y, li, t);
   }
   function getCell(x, y, ln) {
     const m = curMap();
-    return m.layers[ln][y * m.width + x];
+    const li = LAYER_ORDER.indexOf(ln);
+    if (li < 0) return 0;
+    return mapTileId(m, x, y, li);
   }
   function topLayerAt(x, y) {
-    const m = curMap(),
-      i = y * m.width + x;
-    for (const ln of ["over", "decor2", "decor"])
-      if (m.layers[ln][i]) return ln;
+    const m = curMap();
+    for (let li = 3; li >= 1; li--) {
+      if (mapTileId(m, x, y, li)) return LAYER_ORDER[li];
+    }
+    if (mapTileId(m, x, y, 0)) return "ground";
     return "ground";
   }
   // Auto layer for grid-free: terrain → ground, decor → decor (no decor2 stacking)
@@ -1702,25 +1886,34 @@ const editorI18n = await createEditorI18n({
   // Auto layer: terrain tiles go to ground; decorations stack onto decor, then decor 2.
   function resolvePaintLayer(t, x, y) {
     if (layer !== "auto") return layer;
+    // RMMV tile IDs >= 2048: autotile slots A1-A5 go to ground, B-E to decor
+    if (t >= 2048) {
+      var d = decodeTileId(t);
+      if (d && d.slot <= 4) return "ground"; // A1-A5
+      return "decor"; // B-E
+    }
     const def = Assets.tiles[t];
     if (!def || def.terrain) return "ground";
-    const m = curMap(),
-      i = y * m.width + x;
-    if (!m.layers.decor[i] || m.layers.decor[i] === t) return "decor";
+    var m2 = curMap();
+    if (!mapTileId(m2, x, y, 1) || mapTileId(m2, x, y, 1) === t) return "decor";
     return "decor2";
   }
   function floodFill(x, y, t, ln) {
     const m = curMap();
-    const arr = m.layers[ln];
-    const target = arr[y * m.width + x];
+    const li = LAYER_ORDER.indexOf(ln);
+    if (li < 0) return;
+    const target = mapTileId(m, x, y, li);
     if (target === t) return;
     const stack = [[x, y]];
+    const visited = new Set();
     while (stack.length) {
       const [cx, cy] = stack.pop();
       if (cx < 0 || cy < 0 || cx >= m.width || cy >= m.height) continue;
-      const i = cy * m.width + cx;
-      if (arr[i] !== target) continue;
-      arr[i] = t;
+      const key = cy * m.width + cx;
+      if (visited.has(key)) continue;
+      if (mapTileId(m, cx, cy, li) !== target) continue;
+      visited.add(key);
+      setMapTileId(m, cx, cy, li, t);
       stack.push([cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]);
     }
   }
@@ -1749,14 +1942,16 @@ const editorI18n = await createEditorI18n({
     renderMap();
   }
   function paintShadow(cell, bit, add) {
-    const m = curMap(),
-      i = cell.y * m.width + cell.x;
+    const m = curMap();
+    if (!m.shadows) return;
+    const i = cell.y * m.width + cell.x;
     m.shadows[i] = add ? m.shadows[i] | bit : m.shadows[i] & ~bit;
     touch();
     renderMap();
   }
   function paintPass(cell, val) {
     const m = curMap();
+    if (!m.passOv) return;
     m.passOv[cell.y * m.width + cell.x] = val;
     touch();
     renderMap();
@@ -1829,31 +2024,54 @@ const editorI18n = await createEditorI18n({
       r = selection;
     const w = r.x2 - r.x1 + 1,
       h2 = r.y2 - r.y1 + 1;
-    const clip = { w, h: h2, layers: {}, shadows: [], heights: [] };
-    for (const ln of LAYER_ORDER) clip.layers[ln] = [];
-    const hts = heightsOf(m);
-    for (let y = r.y1; y <= r.y2; y++) {
-      for (let x = r.x1; x <= r.x2; x++) {
-        const i = y * m.width + x;
-        for (const ln of LAYER_ORDER) clip.layers[ln].push(m.layers[ln][i]);
-        clip.shadows.push(m.shadows[i]);
-        clip.heights.push(hts[i] || 0);
+    if (m.data) {
+      const clip = { w, h: h2, data: [], _rmmv: true };
+      for (let y = r.y1; y <= r.y2; y++) {
+        for (let x = r.x1; x <= r.x2; x++) {
+          for (let li = 0; li < 4; li++)
+            clip.data.push(mapTileId(m, x, y, li));
+        }
       }
-    }
-    clipTiles = clip;
-    clipEvent = null;
-    if (cut) {
-      pushUndo();
+      clipTiles = clip;
+      clipEvent = null;
+      if (cut) {
+        pushUndo();
+        for (let y = r.y1; y <= r.y2; y++) {
+          for (let x = r.x1; x <= r.x2; x++) {
+            for (let li = 0; li < 4; li++)
+              setMapTileId(m, x, y, li, 0);
+          }
+        }
+        touch();
+        renderMap();
+      }
+    } else {
+      const clip = { w, h: h2, layers: {}, shadows: [], heights: [] };
+      for (const ln of LAYER_ORDER) clip.layers[ln] = [];
+      const hts = heightsOf(m);
       for (let y = r.y1; y <= r.y2; y++) {
         for (let x = r.x1; x <= r.x2; x++) {
           const i = y * m.width + x;
-          for (const ln of LAYER_ORDER) m.layers[ln][i] = 0;
-          m.shadows[i] = 0;
-          heightsOf(m)[i] = 0;
+          for (const ln of LAYER_ORDER) clip.layers[ln].push(m.layers[ln][i]);
+          clip.shadows.push(m.shadows[i]);
+          clip.heights.push(hts[i] || 0);
         }
       }
-      touch();
-      renderMap();
+      clipTiles = clip;
+      clipEvent = null;
+      if (cut) {
+        pushUndo();
+        for (let y = r.y1; y <= r.y2; y++) {
+          for (let x = r.x1; x <= r.x2; x++) {
+            const i = y * m.width + x;
+            for (const ln of LAYER_ORDER) m.layers[ln][i] = 0;
+            m.shadows[i] = 0;
+            heightsOf(m)[i] = 0;
+          }
+        }
+        touch();
+        renderMap();
+      }
     }
     flashStatus(
       (cut ? "Cut " : "Copied ") +
@@ -1883,17 +2101,31 @@ const editorI18n = await createEditorI18n({
     if (pasteMode === "tiles" && clipTiles) {
       pushUndo();
       const m = curMap();
-      for (let dy = 0; dy < clipTiles.h; dy++) {
-        for (let dx = 0; dx < clipTiles.w; dx++) {
-          const x = cell.x + dx,
-            y = cell.y + dy;
-          if (x >= m.width || y >= m.height) continue;
-          const si = dy * clipTiles.w + dx,
-            di = y * m.width + x;
-          for (const ln of LAYER_ORDER)
-            m.layers[ln][di] = clipTiles.layers[ln][si];
-          m.shadows[di] = clipTiles.shadows[si];
-          heightsOf(m)[di] = (clipTiles.heights && clipTiles.heights[si]) || 0;
+      if (clipTiles._rmmv) {
+        for (let dy = 0; dy < clipTiles.h; dy++) {
+          for (let dx = 0; dx < clipTiles.w; dx++) {
+            const x = cell.x + dx,
+              y = cell.y + dy;
+            if (x >= m.width || y >= m.height) continue;
+            for (let li = 0; li < 4; li++) {
+              const si = (dy * clipTiles.w + dx) * 4 + li;
+              setMapTileId(m, x, y, li, clipTiles.data[si]);
+            }
+          }
+        }
+      } else {
+        for (let dy = 0; dy < clipTiles.h; dy++) {
+          for (let dx = 0; dx < clipTiles.w; dx++) {
+            const x = cell.x + dx,
+              y = cell.y + dy;
+            if (x >= m.width || y >= m.height) continue;
+            const si = dy * clipTiles.w + dx,
+              di = y * m.width + x;
+            for (const ln of LAYER_ORDER)
+              m.layers[ln][di] = clipTiles.layers[ln][si];
+            if (clipTiles.shadows) m.shadows[di] = clipTiles.shadows[si];
+            heightsOf(m)[di] = (clipTiles.heights && clipTiles.heights[si]) || 0;
+          }
         }
       }
       touch();
@@ -2676,7 +2908,7 @@ const editorI18n = await createEditorI18n({
   }
   function addMap() {
     const id = RA.nextId(proj.maps);
-    const m = DataDefaults.newMap(id, "Map " + id, 20, 15, Assets.T.grass);
+    const m = DataDefaults.newMap(id, "Map " + id, 20, 15);
     proj.maps.push(m);
     curMapId = id;
     rebuildMapList();
@@ -3084,6 +3316,7 @@ const editorI18n = await createEditorI18n({
       }
     }
 
+    if (m.data) return { id: m.id, name: m.name };
     const ground = m.layers.ground;
     const decor = m.layers.decor;
 
@@ -3507,19 +3740,34 @@ const editorI18n = await createEditorI18n({
   function resizeMap(m, w, h2) {
     w = Math.max(5, Math.min(200, w));
     h2 = Math.max(5, Math.min(200, h2));
-    const remap = (old, fill) => {
-      const arr = new Array(w * h2).fill(fill);
-      for (let y = 0; y < Math.min(m.height, h2); y++) {
-        for (let x = 0; x < Math.min(m.width, w); x++)
-          arr[y * w + x] = old[y * m.width + x];
+    if (m.data) {
+      var oldData = m.data;
+      var newData = new Array(w * h2 * 4).fill(0);
+      for (var y = 0; y < Math.min(m.height, h2); y++) {
+        for (var x = 0; x < Math.min(m.width, w); x++) {
+          for (var li = 0; li < 4; li++) {
+            var oldI = (y * m.width + x) * 4 + li;
+            var newI = (y * w + x) * 4 + li;
+            newData[newI] = oldData[oldI] || 0;
+          }
+        }
       }
-      return arr;
-    };
-    for (const ln of LAYER_ORDER)
-      m.layers[ln] = remap(m.layers[ln], ln === "ground" ? Assets.T.grass : 0);
-    m.shadows = remap(m.shadows, 0);
-    m.passOv = remap(m.passOv, 0);
-    m.heights = remap(heightsOf(m), 0);
+      m.data = newData;
+    } else {
+      const remap = (old, fill) => {
+        const arr = new Array(w * h2).fill(fill);
+        for (let y = 0; y < Math.min(m.height, h2); y++) {
+          for (let x = 0; x < Math.min(m.width, w); x++)
+            arr[y * w + x] = old[y * m.width + x];
+        }
+        return arr;
+      };
+      for (const ln of LAYER_ORDER)
+        m.layers[ln] = remap(m.layers[ln], ln === "ground" ? Assets.T.grass : 0);
+      if (m.shadows) m.shadows = remap(m.shadows, 0);
+      if (m.passOv) m.passOv = remap(m.passOv, 0);
+      if (m.heights) m.heights = remap(heightsOf(m), 0);
+    }
     m.width = w;
     m.height = h2;
     m.events = m.events.filter((e) => e.x < w && e.y < h2);
@@ -3570,11 +3818,18 @@ const editorI18n = await createEditorI18n({
     lg.fillRect(0, 0, lower.width, lower.height);
     for (let y = 0; y < m.height; y++) {
       for (let x = 0; x < m.width; x++) {
-        const i = y * m.width + x;
-        Assets.drawTile(lg, m.layers.ground[i], x * TILE, y * TILE);
-        Assets.drawTile(lg, m.layers.decor[i], x * TILE, y * TILE);
-        Assets.drawTile(lg, m.layers.decor2[i], x * TILE, y * TILE);
-        Assets.drawTile(ug, m.layers.over[i], x * TILE, y * TILE);
+        if (m.data) {
+          Assets.drawTile(lg, mapTileId(m, x, y, 0), x * TILE, y * TILE);
+          Assets.drawTile(lg, mapTileId(m, x, y, 1), x * TILE, y * TILE);
+          Assets.drawTile(lg, mapTileId(m, x, y, 2), x * TILE, y * TILE);
+          Assets.drawTile(ug, mapTileId(m, x, y, 3), x * TILE, y * TILE);
+        } else {
+          const i = y * m.width + x;
+          Assets.drawTile(lg, m.layers.ground[i], x * TILE, y * TILE);
+          Assets.drawTile(lg, m.layers.decor[i], x * TILE, y * TILE);
+          Assets.drawTile(lg, m.layers.decor2[i], x * TILE, y * TILE);
+          Assets.drawTile(ug, m.layers.over[i], x * TILE, y * TILE);
+        }
       }
     }
     if (m.shadows) {
@@ -3661,23 +3916,12 @@ const editorI18n = await createEditorI18n({
       closeHdPreview();
       return;
     }
-    // The in-editor HD-2D live preview was built on the old synchronous GLRender. The new
-    // PIXI renderer (Renderer, aliased to GLRender) is async and renders to its own canvas,
-    // so this preview needs a PIXI rewrite — disable it gracefully until then rather than
-    // throwing every frame. (The in-game HD-2D rendering uses the new renderer fully.)
-    const asyncRenderer =
-      typeof GLRender !== "undefined" &&
-      GLRender.available &&
-      GLRender.available.constructor &&
-      GLRender.available.constructor.name === "AsyncFunction";
-    if (typeof GLRender === "undefined" || asyncRenderer) {
+    
+    if (typeof GLRender === "undefined" || !GLRender.available()) {
       flashStatus(t("status.preview_unavailable"));
       return;
     }
-    if (!GLRender.available()) {
-      flashStatus(t("status.webgl2_required"));
-      return;
-    }
+
     hdCanvas = h("canvas", {
       width: 480,
       height: 360,
@@ -3956,11 +4200,10 @@ const editorI18n = await createEditorI18n({
       ctx.imageSmoothingEnabled = false;
       ctx.fillStyle = "#15151d";
       ctx.fillRect(0, 0, m.width * TILE, m.height * TILE);
-      for (const ln of LAYER_ORDER) {
-        const arr = m.layers[ln];
+      for (let li = 0; li < LAYER_ORDER.length; li++) {
         for (let y = 0; y < m.height; y++)
           for (let x = 0; x < m.width; x++)
-            Assets.drawTile(ctx, arr[y * m.width + x], x * TILE, y * TILE);
+            Assets.drawTile(ctx, mapTileId(m, x, y, li), x * TILE, y * TILE);
       }
       ctx.strokeStyle = "rgba(255,255,255,0.08)";
       ctx.lineWidth = TILE / PS;
@@ -8174,6 +8417,12 @@ const editorI18n = await createEditorI18n({
         label: "Variables",
         build: () => nameListTab("variables", "V", RA.MAX_VARIABLES),
       },
+      {
+        label: t("dialog.tilesets"),
+        build() {
+          return buildTilesetTab(proj, Assets, t, h, touch);
+        },
+      },
     ];
   }
 
@@ -8871,7 +9120,7 @@ atlas.onMapLoad((map) => {
         build() {
           const grid = h("div", { class: "res-grid" });
           Assets.tiles.forEach((t, i) => {
-            if (i === 0) return;
+            if (!t) return;
             grid.appendChild(
               resCell(
                 copyCanvas(Assets.tileCanvas(i)),
@@ -9574,23 +9823,7 @@ atlas.onMapLoad((map) => {
     icon: "new",
     tip: "tip.new_project",
     run() {
-      if (host.isTauri) {
-        openNewProjectDialog();
-      } else {
-        confirmBox(t("dialog.confirm_new_project"), () => {
-          proj = DataDefaults.newProject();
-          Assets.registerCustomChars(proj.customChars);
-          Assets.bindExternalAssets(proj);
-          curMapId = proj.maps[0].id;
-          selectedEvent = null;
-          selection = null;
-          pasteMode = null;
-          undoStack.length = 0;
-          redoStack.length = 0;
-          rebuildAll();
-          touch();
-        });
-      }
+      openNewProjectDialog();
     },
   });
   act("open", {
@@ -9652,9 +9885,11 @@ atlas.onMapLoad((map) => {
   act("hdpreview", {
     label: "HD-2D Preview",
     icon: "hd2d",
-    tip: "Toggle the live HD-2D preview panel (uses this map's HD-2D settings)",
-    active: () => !!hdPanel,
-    run: toggleHdPreview,
+    tip: "HD-2D Preview — temporarily disabled (see wiki/HD-2D-Fixes.md)",
+    enabled: () => false,
+    run() {
+      flashStatus("HD-2D Preview está temporariamente desativado.");
+    },
   });
 
   act("undo", {
@@ -9933,7 +10168,6 @@ atlas.onMapLoad((map) => {
       "mode-pass",
       "mode-height",
       "mode-collision",
-      "mode-flags",
     ],
     ["layer-auto", "layer-ground", "layer-decor", "layer-decor2", "layer-over"],
     [
@@ -9945,18 +10179,6 @@ atlas.onMapLoad((map) => {
       "tool-shadow",
     ],
     ["zoomin", "zoomout", "zoom1", "snap-toggle"],
-    [
-      "flags-passage",
-      "flags-dir-n",
-      "flags-dir-s",
-      "flags-dir-e",
-      "flags-dir-w",
-      "flags-ladder",
-      "flags-bush",
-      "flags-counter",
-      "flags-damage",
-      "flags-terrain",
-    ],
     ["db", "plugins", "audio", "search", "resources", "chargen"],
     ["hdpreview", "play"],
   ];
@@ -10017,7 +10239,6 @@ atlas.onMapLoad((map) => {
         "mode-pass",
         "mode-height",
         "mode-collision",
-        "mode-flags",
         "-",
         "mode-start",
       ],
@@ -10258,7 +10479,11 @@ atlas.onMapLoad((map) => {
       } else if (paletteTab === "today") {
         const m = curMap();
         const usedIds = new Set();
-        if (m && m.tilePlacements) {
+        if (m && m.data) {
+          for (let i = 0; i < m.data.length; i++) {
+            if (m.data[i] > 0) usedIds.add(m.data[i]);
+          }
+        } else if (m && m.tilePlacements) {
           for (const ln of LAYER_ORDER) {
             for (const p of m.tilePlacements[ln] || []) usedIds.add(p.tileId);
           }
@@ -10343,7 +10568,11 @@ atlas.onMapLoad((map) => {
       } else if (paletteTab === "today") {
         const m = curMap();
         const usedIds = new Set();
-        if (m && m.tilePlacements) {
+        if (m && m.data) {
+          for (let i = 0; i < m.data.length; i++) {
+            if (m.data[i] > 0) usedIds.add(m.data[i]);
+          }
+        } else if (m && m.tilePlacements) {
           for (const ln of LAYER_ORDER) {
             for (const p of m.tilePlacements[ln] || []) usedIds.add(p.tileId);
           }
@@ -10506,9 +10735,6 @@ atlas.onMapLoad((map) => {
           break;
         case "KeyC":
           runAct("mode-collision");
-          break;
-        case "KeyG":
-          runAct("mode-flags");
           break;
         case "KeyH":
           runAct("mode-height");

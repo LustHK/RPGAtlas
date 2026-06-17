@@ -245,10 +245,13 @@ void main() {
       geometry.uvs = new Float32Array(uvs);
       geometry.addAttribute('aTint', { buffer: new Float32Array(tints), size: 1 });
 
+      const texSrc = ch.texture.source;
+      if (!texSrc) continue;
+
       const shader = PIXI.Shader.from({
-        gl: { vertex: _TERRAIN_VS, fragment: _TERRAIN_FS },
+        glProgram: new PIXI.GlProgram({ vertex: _TERRAIN_VS, fragment: _TERRAIN_FS }),
         resources: {
-          uSampler: ch.texture.source,
+          uSampler: texSrc,
           uMVP: new Float32Array(16),
           uEye: new Float32Array(3),
           uFog: new Float32Array([0, 0, 0, 0]),
@@ -256,7 +259,7 @@ void main() {
         },
       });
 
-      const mesh = new PIXI.Mesh({ geometry, shader });
+      const mesh = new PIXI.Mesh(geometry, shader);
       mesh.state.depthTest = true;
       mesh.blendMode = 'normal';
       _terrainMeshes.push(mesh);
@@ -264,7 +267,7 @@ void main() {
     }
 
     // ---- Build overhead (upper) meshes ----
-    const over = map.layers && map.layers.over;
+    var over = map.data ? null : (map.layers && map.layers.over);
     for (const ch of upper) {
       const poses = [], uvs = [], tints = [];
       let vertCount = 0;
@@ -292,10 +295,13 @@ void main() {
       geometry.uvs = new Float32Array(uvs);
       geometry.addAttribute('aTint', { buffer: new Float32Array(tints), size: 1 });
 
+      const texSrc2 = ch.texture.source;
+      if (!texSrc2) continue;
+
       const shader = PIXI.Shader.from({
-        gl: { vertex: _TERRAIN_VS, fragment: _TERRAIN_FS },
+        glProgram: new PIXI.GlProgram({ vertex: _TERRAIN_VS, fragment: _TERRAIN_FS }),
         resources: {
-          uSampler: ch.texture.source,
+          uSampler: texSrc2,
           uMVP: new Float32Array(16),
           uEye: new Float32Array(3),
           uFog: new Float32Array([0, 0, 0, 0]),
@@ -303,7 +309,7 @@ void main() {
         },
       });
 
-      const mesh = new PIXI.Mesh({ geometry, shader });
+      const mesh = new PIXI.Mesh(geometry, shader);
       mesh.state.depthTest = false;
       mesh.blendMode = 'normal';
       _overheadMeshes.push(mesh);
@@ -741,11 +747,15 @@ void main() {
   }
 
   function extractCanvas(w, h) {
+    _ensureSceneRT(w, h);
     const c = document.createElement("canvas");
     c.width = w;
     c.height = h;
-    c.getContext("2d").drawImage(app.canvas, 0, 0);
-    return c;
+    
+    // Wrap RenderTexture in a Sprite for extraction, as direct RenderTexture 
+    // extraction can trigger internal PIXI v8 errors in some contexts.
+    const sprite = new PIXI.Sprite(_sceneRT);
+    return app.renderer.extract.canvas(sprite);
   }
 
   function _ensureSceneRT(w, h) {

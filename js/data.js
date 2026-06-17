@@ -307,24 +307,83 @@
             p[key][i].icon = defaults[i % defaults.length];
         }
       }
+      // v4 migration: convert tilesets from object to RMMV array format
+      if (p.tilesets && !Array.isArray(p.tilesets)) {
+        const obj = p.tilesets;
+        const arr = [null];
+        let idx = 1;
+        for (const key of Object.keys(obj)) {
+          const entry = obj[key];
+          // Build RMMV-style tileset entry from old format
+          const tilesetNames = ["","","","","","","","",""];
+          const catOrder = ["A1","A2","A3","A4","A5","B","C","D","E"];
+          const catIdx = catOrder.indexOf(entry.category || "B");
+          if (catIdx >= 0) tilesetNames[catIdx] = (entry.file || key).replace(/\.png$/i, "");
+          arr[idx] = {
+            id: idx,
+            name: key,
+            mode: 1,
+            note: "",
+            tilesetNames: tilesetNames,
+            flags: entry.tileFlags || new Array(2048).fill(0x0010),
+          };
+          idx++;
+        }
+        p.tilesets = arr;
+      }
+
       for (const m of p.maps || []) {
         const n = m.width * m.height;
-        if (!m.layers.decor2 || m.layers.decor2.length !== n)
-          m.layers.decor2 = new Array(n).fill(0);
-        if (!m.shadows || m.shadows.length !== n)
-          m.shadows = new Array(n).fill(0);
-        if (!m.passOv || m.passOv.length !== n) m.passOv = new Array(n).fill(0);
-        if (!m.heights || m.heights.length !== n)
-          m.heights = new Array(n).fill(0);
-        if (
-          !m.collision ||
-          !Array.isArray(m.collision.tiles) ||
-          m.collision.tiles.length !== n
-        )
-          m.collision = { tiles: new Array(n).fill(null), masks: [] };
-        if (m.gridFree == null) m.gridFree = false;
-        if (!m.tilePlacements)
-          m.tilePlacements = { ground: [], decor: [], decor2: [], over: [] };
+        // v4 migration: convert old layers[] + gridFree format to RMMV data[]
+        if (m.layers && !m.data) {
+          const oldLayers = m.layers;
+          const dataLen = n * 4;
+          const data = new Array(dataLen).fill(0);
+          const layerKeys = ["ground","decor","decor2","over"];
+          for (let li = 0; li < 4; li++) {
+            const lk = layerKeys[li];
+            const src = oldLayers[lk];
+            if (!src || src.length !== n) continue;
+            for (let i = 0; i < n; i++) {
+              // Convert old global tile IDs to RMMV tile IDs.
+              // Old IDs were indexes into Assets.tiles[] — we convert by taking
+              // the tile's tilesetX/Y and computing the RMMV ID.
+              // Fallback: use 2048 (A1 base) for ground, 0 for others.
+              const oldId = src[i];
+              data[i * 4 + li] = oldId ? oldId + 2048 : (li === 0 ? 2048 : 0);
+            }
+          }
+          m.data = data;
+          delete m.layers;
+          delete m.shadows;
+          delete m.passOv;
+          delete m.heights;
+          delete m.collision;
+          delete m.gridFree;
+          delete m.tilePlacements;
+          delete m.music;
+          // Ensure RMMV fields
+          m.tilesetId = m.tilesetId || 1;
+          m.autoplayBgm = m.autoplayBgm || false;
+          m.autoplayBgs = m.autoplayBgs || false;
+          m.battleback1Name = m.battleback1Name || "";
+          m.battleback2Name = m.battleback2Name || "";
+          m.bgm = m.bgm || {name:"",pan:0,pitch:100,volume:90};
+          m.bgs = m.bgs || {name:"",pan:0,pitch:100,volume:90};
+          m.disableDashing = m.disableDashing || false;
+          m.displayName = m.displayName || "";
+          m.encounterList = m.encounterList || [];
+          m.encounterStep = m.encounterStep || 30;
+          m.note = m.note || "";
+          m.parallaxLoopX = m.parallaxLoopX || false;
+          m.parallaxLoopY = m.parallaxLoopY || false;
+          m.parallaxName = m.parallaxName || "";
+          m.parallaxShow = m.parallaxShow || false;
+          m.parallaxSx = m.parallaxSx || 0;
+          m.parallaxSy = m.parallaxSy || 0;
+          m.scrollType = m.scrollType || 0;
+          m.specifyBattleback = m.specifyBattleback || false;
+        }
       }
       // Pre-rebrand projects carry Drift_* built-ins: rename them to Atlas_* and
       // refresh their engine-maintained code (Atlas_Core keeps a window.Drift
@@ -386,28 +445,39 @@
   const DataDefaults = (() => {
     const T = (typeof Assets !== "undefined" ? Assets.T : {});
 
-    function newMap(id, name, width, height, groundTile) {
+    function newMap(id, name, width, height) {
       const n = width * height;
+      const dataLen = n * 4;
+      const data = new Array(dataLen).fill(0);
+      // Preencher layer 0 (ground) com tile A1 base (2048) por default
+      for (let i = 0; i < n; i++) data[i * 4] = 2048;
       return {
         id,
         name,
         width,
         height,
-        gridFree: true,
-        tilePlacements: { ground: [], decor: [], decor2: [], over: [] },
-        music: "field",
-        encounters: { troops: [], rate: 0 },
-        layers: {
-          ground: new Array(n).fill(groundTile == null ? (T ? T.grass : 0) : groundTile),
-          decor: new Array(n).fill(0),
-          decor2: new Array(n).fill(0),
-          over: new Array(n).fill(0),
-        },
-        shadows: new Array(n).fill(0), // 4-bit quadrant mask per tile: 1=TL 2=TR 4=BL 8=BR
-        passOv: new Array(n).fill(0), // passability override: 0=auto 1=force pass 2=force block
-        heights: new Array(n).fill(0), // HD-2D elevation in tile units (visual only; 0 = flat)
-        collision: { tiles: new Array(n).fill(null), masks: [] },
+        tilesetId: 1,
+        data,
         events: [],
+        autoplayBgm: false,
+        autoplayBgs: false,
+        battleback1Name: "",
+        battleback2Name: "",
+        bgm: { name: "", pan: 0, pitch: 100, volume: 90 },
+        bgs: { name: "", pan: 0, pitch: 100, volume: 90 },
+        disableDashing: false,
+        displayName: "",
+        encounterList: [],
+        encounterStep: 30,
+        note: "",
+        parallaxLoopX: false,
+        parallaxLoopY: false,
+        parallaxName: "",
+        parallaxShow: false,
+        parallaxSx: 0,
+        parallaxSy: 0,
+        scrollType: 0,
+        specifyBattleback: false,
       };
     }
 
@@ -461,7 +531,7 @@
         customChars: [],
         commandPresets: [],
         assets: { tiles: {} },
-        tilesets: {}
+        tilesets: [null]
       };
     }
 
@@ -491,11 +561,20 @@
 
     // ---- map building helpers (sample game) ----
     function L(map, layer) {
-      return map.layers[layer];
+      return map.layers ? map.layers[layer] : null;
     }
     function set(map, layer, x, y, t) {
       if (x < 0 || y < 0 || x >= map.width || y >= map.height) return;
-      L(map, layer)[y * map.width + x] = t;
+      if (map.data) {
+        var li = 0;
+        if (layer === "ground") li = 0;
+        else if (layer === "decor") li = 1;
+        else if (layer === "decor2") li = 2;
+        else if (layer === "over") li = 3;
+        map.data[(y * map.width + x) * 4 + li] = t;
+      } else {
+        L(map, layer)[y * map.width + x] = t;
+      }
     }
     function fillRect(map, layer, x1, y1, x2, y2, t) {
       for (let y = y1; y <= y2; y++)
