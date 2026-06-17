@@ -12,12 +12,16 @@ import {
   openProjectFromFolder,
   saveProjectToFolder,
 } from "./editor/project-io.js";
-import { createNewProject, sanitizeProjectName } from "./editor/project-generator.js";
+import {
+  createNewProject,
+  sanitizeProjectName,
+} from "./editor/project-generator.js";
 import * as host from "./editor/host.js";
 const { create: createEditorI18n } = window.RPGAtlasI18n;
 import { getPatchNotes } from "./patch-notes.js";
 
-const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window.RPGAtlasDeps;
+const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } =
+  window.RPGAtlasDeps;
 const editorI18n = await createEditorI18n({
   storage: window.localStorage,
   document,
@@ -28,53 +32,66 @@ const editorI18n = await createEditorI18n({
   const t = editorI18n.t;
   const TILE = Assets.TILE;
   const LAYER_ORDER = ["ground", "decor", "decor2", "over"];
-  const LAYER_LABELS = { auto: "layer.auto", ground: "layer.ground", decor: "layer.decor", decor2: "layer.decor2", over: "layer.over" };
-  const TOOL_LABELS = { pen: "tool.pen", erase: "tool.eraser", rect: "tool.rectangle", circle: "tool.circle", fill: "tool.fill", shadow: "tool.shadow_pen" };
+  const LAYER_LABELS = {
+    auto: "layer.auto",
+    ground: "layer.ground",
+    decor: "layer.decor",
+    decor2: "layer.decor2",
+    over: "layer.over",
+  };
+  const TOOL_LABELS = {
+    pen: "tool.pen",
+    erase: "tool.eraser",
+    rect: "tool.rectangle",
+    circle: "tool.circle",
+    fill: "tool.fill",
+    shadow: "tool.shadow_pen",
+  };
   const ZOOMS = [0.25, 1 / 3, 0.5, 2 / 3, 0.75, 1, 1.5, 2];
   let proj = null;
   let curMapId = 1;
-  let layer = "auto";        // auto | ground | decor | decor2 | over
-  let tool = "pen";          // pen | erase | rect | circle | fill | shadow
-  let mode = "map";          // map | event | pass | start | height | collision | flags
+  let layer = "auto"; // auto | ground | decor | decor2 | over
+  let tool = "pen"; // pen | erase | rect | circle | fill | shadow
+  let mode = "map"; // map | event | pass | start | height | collision | flags
   let selectedTile = 1;
-  let heightVal = 1;         // HD-2D elevation value painted in height mode (0–9)
+  let heightVal = 1; // HD-2D elevation value painted in height mode (0–9)
   let zoom = 0.75;
   let selectedEvent = null;
   let hoverCell = null;
-  let hoverQuad = 0;         // shadow-pen quadrant bit under the cursor
-  let rectStart = null;      // drag origin for the rect/circle tools
+  let hoverQuad = 0; // shadow-pen quadrant bit under the cursor
+  let rectStart = null; // drag origin for the rect/circle tools
   let dragEvent = null;
-  let dragPushed = false;    // undo snapshot taken for the current event drag
+  let dragPushed = false; // undo snapshot taken for the current event drag
   let painting = false;
-  let shadowSet = true;      // shadow pen: adding (left button) or erasing (right)
-  let passVal = 0;           // passability value being painted during a drag
-  let selecting = false;     // shift-drag marquee in progress
+  let shadowSet = true; // shadow pen: adding (left button) or erasing (right)
+  let passVal = 0; // passability value being painted during a drag
+  let selecting = false; // shift-drag marquee in progress
   let selAnchor = null;
-  let selection = null;      // {x1,y1,x2,y2} inclusive (map mode)
-  let clipTiles = null;      // tile clipboard {w,h,layers,shadows}
-  let clipEvent = null;      // event clipboard (cloned event)
-  let clipCmd = null;        // event-command clipboard (array of cloned commands) — shared across event editors
-  let clipPage = null;       // event-page clipboard (cloned page) — shared across event editors
-  let pasteMode = null;      // null | "tiles" | "event"
+  let selection = null; // {x1,y1,x2,y2} inclusive (map mode)
+  let clipTiles = null; // tile clipboard {w,h,layers,shadows}
+  let clipEvent = null; // event clipboard (cloned event)
+  let clipCmd = null; // event-command clipboard (array of cloned commands) — shared across event editors
+  let clipPage = null; // event-page clipboard (cloned page) — shared across event editors
+  let pasteMode = null; // null | "tiles" | "event"
   // ---- Phase 4 — grid-free editor state ----
   // ---- grid-free editor state ----
-  let paletteTab = "all";          // "all" | tileset key (e.g. "TileA2") | "today"
-  let snapMode = "free";           // "48" | "24" | "free"
-  let selectedPlacement = null;    // {placement, layer} or null
-  let dragPlacement = false;       // dragging a placed tile in map mode
-  let dragPlacementObj = null;     // ref to the placement being dragged
-  let dragPlacementLayer = null;   // layer of the placement being dragged
-  let dragPlacementOffset = null;  // {dx, dy} from mouse to placement origin
+  let paletteTab = "all"; // "all" | tileset key (e.g. "TileA2") | "today"
+  let snapMode = "free"; // "48" | "24" | "free"
+  let selectedPlacement = null; // {placement, layer} or null
+  let dragPlacement = false; // dragging a placed tile in map mode
+  let dragPlacementObj = null; // ref to the placement being dragged
+  let dragPlacementLayer = null; // layer of the placement being dragged
+  let dragPlacementOffset = null; // {dx, dy} from mouse to placement origin
   let dragPlacementPushed = false; // undo snapshot taken for the current drag
 
   // ---- tile flags mode state ----
   let flagsTool = "passage"; // passage | dir-n | dir-s | dir-e | dir-w | ladder | bush | counter | damage | terrain
-  let flagsTerrainVal = 0;  // terrain tag value 0-7
+  let flagsTerrainVal = 0; // terrain tag value 0-7
 
   // ---- palette marquee selection ----
   let paletteMarqueeStart = null; // {row, col} for B-E marquee drag
   let paletteMarqueeEnd = null;
-  let paletteMarqueeTiles = [];   // selected tile IDs from marquee
+  let paletteMarqueeTiles = []; // selected tile IDs from marquee
 
   // collision editor state (in-map visual editor)
   let collisionEditCell = null; // {x,y}
@@ -87,9 +104,9 @@ const editorI18n = await createEditorI18n({
   let collisionSelection = null; // {x1,y1,x2,y2}
   let collisionDragMoved = false;
   // ---- Phase 6 — free-form collision masks ----
-  let selectedMask = null;       // {mask, index} or null
-  let maskDragHandle = null;     // 'nw'|'n'|'ne'|'e'|'se'|'s'|'sw'|'w'|'move'|null
-  let maskDragOffset = null;     // {dx, dy} for move
+  let selectedMask = null; // {mask, index} or null
+  let maskDragHandle = null; // 'nw'|'n'|'ne'|'e'|'se'|'s'|'sw'|'w'|'move'|null
+  let maskDragOffset = null; // {dx, dy} for move
   let maskDragging = false;
   let maskDragMoved = false;
   let _maskIdCounter = 0;
@@ -97,40 +114,66 @@ const editorI18n = await createEditorI18n({
   const redoStack = [];
 
   const $ = (id) => document.getElementById(id);
-  function curMap() { return RA.byId(proj.maps, curMapId); }
+  function curMap() {
+    return RA.byId(proj.maps, curMapId);
+  }
 
   // ============================ tiny DOM builder ============================
   function h(tag, attrs, ...kids) {
     const e = document.createElement(tag);
-    if (attrs) for (const [k, v] of Object.entries(attrs)) {
-      if (k === "class") e.className = v;
-      else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
-      else if (k === "html") e.innerHTML = v;
-      else e.setAttribute(k, v);
-    }
+    if (attrs)
+      for (const [k, v] of Object.entries(attrs)) {
+        if (k === "class") e.className = v;
+        else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+        else if (k === "html") e.innerHTML = v;
+        else e.setAttribute(k, v);
+      }
     for (const k of kids) {
       if (k == null) continue;
       e.appendChild(typeof k === "string" ? document.createTextNode(k) : k);
     }
     return e;
   }
-  function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
 
   // bound inputs ---------------------------------------------------------
   function tIn(obj, key, cls) {
-    return h("input", { type: "text", value: obj[key] == null ? "" : obj[key], class: cls || "",
-      oninput(e) { obj[key] = e.target.value; touch(); } });
+    return h("input", {
+      type: "text",
+      value: obj[key] == null ? "" : obj[key],
+      class: cls || "",
+      oninput(e) {
+        obj[key] = e.target.value;
+        touch();
+      },
+    });
   }
   function nIn(obj, key, min, max, step) {
-    return h("input", { type: "number", value: obj[key] == null ? 0 : obj[key],
-      min: min == null ? -99999 : min, max: max == null ? 99999 : max, step: step || 1,
-      oninput(e) { obj[key] = Number(e.target.value) || 0; touch(); } });
+    return h("input", {
+      type: "number",
+      value: obj[key] == null ? 0 : obj[key],
+      min: min == null ? -99999 : min,
+      max: max == null ? 99999 : max,
+      step: step || 1,
+      oninput(e) {
+        obj[key] = Number(e.target.value) || 0;
+        touch();
+      },
+    });
   }
   function sel(obj, key, options, onchange) {
     const s = h("select", {
       onchange(e) {
         const raw = e.target.value;
-        obj[key] = isNaN(Number(raw)) || raw === "" || options.stringValues ? raw : Number(raw);
+        obj[key] =
+          isNaN(Number(raw)) || raw === "" || options.stringValues
+            ? raw
+            : Number(raw);
         touch();
         if (onchange) onchange(obj[key]);
       },
@@ -140,33 +183,71 @@ const editorI18n = await createEditorI18n({
     return s;
   }
   function chk(obj, key) {
-    return h("input", { type: "checkbox", onchange(e) { obj[key] = e.target.checked; touch(); } , ...(obj[key] ? { checked: "" } : {}) });
+    return h("input", {
+      type: "checkbox",
+      onchange(e) {
+        obj[key] = e.target.checked;
+        touch();
+      },
+      ...(obj[key] ? { checked: "" } : {}),
+    });
   }
   function rangeIn(obj, key, min, max, suffix) {
-    const out = h("span", { class: "range-val" }, String(obj[key] == null ? min : obj[key]) + (suffix || ""));
-    const r = h("input", { type: "range", min, max, value: obj[key] == null ? min : obj[key],
-      oninput(e) { obj[key] = Number(e.target.value); out.textContent = e.target.value + (suffix || ""); touch(); } });
+    const out = h(
+      "span",
+      { class: "range-val" },
+      String(obj[key] == null ? min : obj[key]) + (suffix || ""),
+    );
+    const r = h("input", {
+      type: "range",
+      min,
+      max,
+      value: obj[key] == null ? min : obj[key],
+      oninput(e) {
+        obj[key] = Number(e.target.value);
+        out.textContent = e.target.value + (suffix || "");
+        touch();
+      },
+    });
     return h("span", { class: "rangewrap" }, r, out);
   }
   function field(label, input) {
     return h("label", { class: "fld" }, h("span", null, t(label)), input);
   }
-  function row(...kids) { return h("div", { class: "frow" }, ...kids); }
+  function row(...kids) {
+    return h("div", { class: "frow" }, ...kids);
+  }
 
   // option helpers -------------------------------------------------------
   function dbOpts(arr, noneLabel) {
     const o = arr.map((e) => ({
       v: e.id,
-      l: e.id + ": " + (e.icon == null ? "" : "Icon " + String(e.icon).padStart(2, "0") + " · ") + e.name,
+      l:
+        e.id +
+        ": " +
+        (e.icon == null
+          ? ""
+          : "Icon " + String(e.icon).padStart(2, "0") + " · ") +
+        e.name,
     }));
     if (noneLabel != null) o.unshift({ v: 0, l: noneLabel });
     return o;
   }
   function switchOpts() {
-    return [{ v: 0, l: "(none)" }].concat(proj.system.switches.map((n, i) => ({ v: i + 1, l: (i + 1) + ": " + (n || "—") })));
+    return [{ v: 0, l: "(none)" }].concat(
+      proj.system.switches.map((n, i) => ({
+        v: i + 1,
+        l: i + 1 + ": " + (n || "—"),
+      })),
+    );
   }
   function varOpts() {
-    return [{ v: 0, l: "(none)" }].concat(proj.system.variables.map((n, i) => ({ v: i + 1, l: (i + 1) + ": " + (n || "—") })));
+    return [{ v: 0, l: "(none)" }].concat(
+      proj.system.variables.map((n, i) => ({
+        v: i + 1,
+        l: i + 1 + ": " + (n || "—"),
+      })),
+    );
   }
   function charsetOpts(humansOnly) {
     const o = [{ v: "", l: "(none)" }];
@@ -177,20 +258,56 @@ const editorI18n = await createEditorI18n({
     o.stringValues = true;
     return o;
   }
-  const DIR_OPTS = [{ v: 0, l: "Down" }, { v: 1, l: "Left" }, { v: 2, l: "Right" }, { v: 3, l: "Up" }];
-  const SE_NAMES = ["cursor", "ok", "cancel", "buzzer", "hit", "crit", "magic", "heal", "item", "chest", "door", "levelup", "save", "escape", "miss", "encounter", "gameover"];
-  const MUSIC_OPTS = () => [{ v: "none", l: "(none)" }].concat(Sfx.THEMES.map((t) => ({ v: t, l: t })));
+  const DIR_OPTS = [
+    { v: 0, l: "Down" },
+    { v: 1, l: "Left" },
+    { v: 2, l: "Right" },
+    { v: 3, l: "Up" },
+  ];
+  const SE_NAMES = [
+    "cursor",
+    "ok",
+    "cancel",
+    "buzzer",
+    "hit",
+    "crit",
+    "magic",
+    "heal",
+    "item",
+    "chest",
+    "door",
+    "levelup",
+    "save",
+    "escape",
+    "miss",
+    "encounter",
+    "gameover",
+  ];
+  const MUSIC_OPTS = () =>
+    [{ v: "none", l: "(none)" }].concat(
+      Sfx.THEMES.map((t) => ({ v: t, l: t })),
+    );
 
   // Type-list options (sourced from Database ▸ Types) ---------------------
   function elementSelOpts() {
-    const o = RA.typeList(proj, "elements").map((e) => ({ v: e.key, l: e.name }));
+    const o = RA.typeList(proj, "elements").map((e) => ({
+      v: e.key,
+      l: e.name,
+    }));
     o.stringValues = true;
     return o;
   }
   function skillTypeSelOpts() {
     const st = RA.typeList(proj, "skillTypes");
-    const base = [{ v: "phys", l: "Physical" }, { v: "magic", l: "Magical" }, { v: "heal", l: "Heal" }];
-    return base.map((b) => { const f = st.find((s) => s.key === b.v); return { v: b.v, l: f ? f.name : b.l }; });
+    const base = [
+      { v: "phys", l: "Physical" },
+      { v: "magic", l: "Magical" },
+      { v: "heal", l: "Heal" },
+    ];
+    return base.map((b) => {
+      const f = st.find((s) => s.key === b.v);
+      return { v: b.v, l: f ? f.name : b.l };
+    });
   }
   function skillTypeTraitOpts() {
     const st = RA.typeList(proj, "skillTypes");
@@ -216,7 +333,9 @@ const editorI18n = await createEditorI18n({
   const modalRoot = () => $("modal-root");
   function modal(opts) {
     const overlay = h("div", { class: "overlay" });
-    const win = h("div", { class: "modal " + (opts.wide ? "wide " : "") + (opts.class || "") });
+    const win = h("div", {
+      class: "modal " + (opts.wide ? "wide " : "") + (opts.class || ""),
+    });
     win.appendChild(h("div", { class: "modal-title" }, t(opts.title || "")));
     const body = h("div", { class: "modal-body" });
     if (opts.content) body.appendChild(opts.content);
@@ -227,14 +346,25 @@ const editorI18n = await createEditorI18n({
       if (opts.onClose) opts.onClose(result);
     }
     (opts.buttons || [{ label: "btn.close" }]).forEach((b) => {
-      btnrow.appendChild(h("button", {
-        class: b.primary ? "primary" : "",
-        onclick() { if (b.onClick) b.onClick(close); else close(); },
-      }, t(b.label)));
+      btnrow.appendChild(
+        h(
+          "button",
+          {
+            class: b.primary ? "primary" : "",
+            onclick() {
+              if (b.onClick) b.onClick(close);
+              else close();
+            },
+          },
+          t(b.label),
+        ),
+      );
     });
     win.appendChild(btnrow);
     overlay.appendChild(win);
-    overlay.addEventListener("mousedown", (e) => { if (e.target === overlay && opts.dismissable !== false) close(); });
+    overlay.addEventListener("mousedown", (e) => {
+      if (e.target === overlay && opts.dismissable !== false) close();
+    });
     modalRoot().appendChild(overlay);
     return { close, body, el: win };
   }
@@ -243,7 +373,14 @@ const editorI18n = await createEditorI18n({
       title: "dialog.confirm",
       content: h("div", null, text),
       buttons: [
-        { label: "btn.ok", primary: true, onClick(c) { c(); onYes(); } },
+        {
+          label: "btn.ok",
+          primary: true,
+          onClick(c) {
+            c();
+            onYes();
+          },
+        },
         { label: "btn.cancel" },
       ],
     });
@@ -267,25 +404,33 @@ const editorI18n = await createEditorI18n({
     }
   }
   function loadStored() {
-    return loadStoredProject(localStorage, (project) => RA.migrateProject(project));
+    return loadStoredProject(localStorage, (project) =>
+      RA.migrateProject(project),
+    );
   }
   // Desktop: the .json file the project is bound to. Save (Ctrl+S) writes here
   // silently once set; the first save — or Export (Save As) — prompts for it.
   let currentProjectPath = null;
-  function baseName(p) { return String(p).replace(/^.*[\\/]/, ""); }
+  function baseName(p) {
+    return String(p).replace(/^.*[\\/]/, "");
+  }
   async function desktopSave(saveAs) {
     saveNow(); // keep the local autosave as a crash-recovery copy
     try {
       // If we have a current project folder, save there instead
       if (currentProjectFolderPath && !saveAs) {
         const ok = await saveProjectToFolder(currentProjectFolderPath, proj);
-        if (ok) flashStatus("Project saved to " + baseName(currentProjectFolderPath));
+        if (ok)
+          flashStatus("Project saved to " + baseName(currentProjectFolderPath));
         else flashStatus("Save to folder failed.");
         return;
       }
       if (saveAs || !currentProjectPath) {
         const path = await host.saveProjectToFile(proj); // native Save dialog
-        if (!path) { flashStatus(t("status.save_cancelled")); return; }
+        if (!path) {
+          flashStatus(t("status.save_cancelled"));
+          return;
+        }
         currentProjectPath = path;
       } else {
         await host.saveProjectToPath(currentProjectPath, proj); // silent overwrite
@@ -296,37 +441,61 @@ const editorI18n = await createEditorI18n({
     }
   }
   function exportProject() {
-    if (host.isTauri) { desktopSave(true); return; } // Export = Save As on desktop
+    if (host.isTauri) {
+      desktopSave(true);
+      return;
+    } // Export = Save As on desktop
     exportProjectFile(proj);
   }
   function openStandaloneExport() {
-    const content = h("div", null,
-      h("p", null, "Build the current project as one self-contained game file. The editor, engine folder, web server, and project .json are not required."),
-      h("p", null, "Windows EXE includes a small launcher that extracts the game and opens it in the player's default browser. Standalone HTML works across platforms."),
-      h("p", { class: "dim" }, "The launcher is unsigned, so Windows may show a security warning. Save slots are kept in the player's browser."),
+    const content = h(
+      "div",
+      null,
+      h(
+        "p",
+        null,
+        "Build the current project as one self-contained game file. The editor, engine folder, web server, and project .json are not required.",
+      ),
+      h(
+        "p",
+        null,
+        "Windows EXE includes a small launcher that extracts the game and opens it in the player's default browser. Standalone HTML works across platforms.",
+      ),
+      h(
+        "p",
+        { class: "dim" },
+        "The launcher is unsigned, so Windows may show a security warning. Save slots are kept in the player's browser.",
+      ),
     );
     modal({
       title: t("dialog.export_game"),
       content,
       buttons: [
-        { label: "Windows EXE", primary: true, async onClick(close) {
-          try {
-            await writeWindowsExecutable(proj, Assets);
-            close();
-            flashStatus(t("status.export_windows_success"));
-          } catch (e) {
-            alert(t("status.export_failed") + e.message);
-          }
-        } },
-        { label: "Standalone HTML", async onClick(close) {
-          try {
-            await writeStandaloneHtml(proj, Assets);
-            close();
-            flashStatus(t("status.export_html_success"));
-          } catch (e) {
-            alert(t("status.export_failed") + e.message);
-          }
-        } },
+        {
+          label: "Windows EXE",
+          primary: true,
+          async onClick(close) {
+            try {
+              await writeWindowsExecutable(proj, Assets);
+              close();
+              flashStatus(t("status.export_windows_success"));
+            } catch (e) {
+              alert(t("status.export_failed") + e.message);
+            }
+          },
+        },
+        {
+          label: "Standalone HTML",
+          async onClick(close) {
+            try {
+              await writeStandaloneHtml(proj, Assets);
+              close();
+              flashStatus(t("status.export_html_success"));
+            } catch (e) {
+              alert(t("status.export_failed") + e.message);
+            }
+          },
+        },
         { label: "Cancel" },
       ],
     });
@@ -336,16 +505,24 @@ const editorI18n = await createEditorI18n({
     r.onload = async () => {
       try {
         const p = JSON.parse(r.result);
-        if (!p || !p.meta || (p.meta.engine !== "rpgatlas" && p.meta.engine !== "driftwood")) throw new Error("Not an RPGAtlas project file.");
+        if (
+          !p ||
+          !p.meta ||
+          (p.meta.engine !== "rpgatlas" && p.meta.engine !== "driftwood")
+        )
+          throw new Error("Not an RPGAtlas project file.");
         proj = RA.migrateProject(p);
         Assets.registerCustomChars(proj.customChars);
         await Assets.loadExternalAssets(proj);
         curMapId = proj.maps[0].id;
         selectedEvent = null;
-        undoStack.length = 0; redoStack.length = 0;
+        undoStack.length = 0;
+        redoStack.length = 0;
         rebuildAll();
         touch();
-      } catch (e) { alert("Import failed: " + e.message); }
+      } catch (e) {
+        alert("Import failed: " + e.message);
+      }
     };
     r.readAsText(file);
   }
@@ -355,7 +532,11 @@ const editorI18n = await createEditorI18n({
 
   function setProjectFolderPath(path) {
     currentProjectFolderPath = path;
-    try { localStorage.setItem("rpgatlas_project_folder", path || ""); } catch (e) { /* ignore */ }
+    try {
+      localStorage.setItem("rpgatlas_project_folder", path || "");
+    } catch (e) {
+      /* ignore */
+    }
   }
 
   function resetProject(project) {
@@ -363,16 +544,39 @@ const editorI18n = await createEditorI18n({
     Assets.registerCustomChars(proj.customChars);
     Assets.bindExternalAssets(proj);
     if (proj.maps && proj.maps.length) curMapId = proj.maps[0].id;
-    selectedEvent = null; selection = null; pasteMode = null;
-    undoStack.length = 0; redoStack.length = 0;
-    rebuildAll(); touch();
+    selectedEvent = null;
+    selection = null;
+    pasteMode = null;
+    undoStack.length = 0;
+    redoStack.length = 0;
+    rebuildAll();
+    touch();
   }
 
   async function openNewProjectDialog() {
-    const nameInput = h("input", { id: "new-proj-name", type: "text", placeholder: "my_rpg_game", value: "new_project" });
-    const titleInput = h("input", { id: "new-proj-title", type: "text", placeholder: "My RPG Game", value: "Untitled RPG" });
-    const destInput = h("input", { id: "new-proj-dest", type: "text", readonly: true, placeholder: "Select a folder…" });
-    const browseBtn = h("button", { id: "new-proj-browse", class: "mini" }, t("dialog.browse"));
+    const nameInput = h("input", {
+      id: "new-proj-name",
+      type: "text",
+      placeholder: "my_rpg_game",
+      value: "new_project",
+    });
+    const titleInput = h("input", {
+      id: "new-proj-title",
+      type: "text",
+      placeholder: "My RPG Game",
+      value: "Untitled RPG",
+    });
+    const destInput = h("input", {
+      id: "new-proj-dest",
+      type: "text",
+      readonly: true,
+      placeholder: "Select a folder…",
+    });
+    const browseBtn = h(
+      "button",
+      { id: "new-proj-browse", class: "mini" },
+      t("dialog.browse"),
+    );
 
     let selectedDest = null;
     browseBtn.addEventListener("click", async () => {
@@ -383,7 +587,9 @@ const editorI18n = await createEditorI18n({
       }
     });
 
-    const content = h("div", { class: "new-proj-form" },
+    const content = h(
+      "div",
+      { class: "new-proj-form" },
       h("label", null, t("dialog.new_project_name") || "Project Name:"),
       nameInput,
       h("label", null, t("dialog.new_project_title") || "Game Title:"),
@@ -396,34 +602,54 @@ const editorI18n = await createEditorI18n({
       title: t("dialog.new_project") || "Create New Project",
       content,
       buttons: [
-        { label: t("dialog.create") || "Create", primary: true, onClick: async (close) => {
-          const projName = nameInput.value.trim();
-          const gameTitle = titleInput.value.trim() || projName;
-          if (!selectedDest) { alert("Please select a destination folder."); return; }
-          if (!projName) { alert("Please enter a project name."); return; }
-
-          close();
-          flashStatus("Creating project…");
-          const result = await createNewProject(projName, gameTitle, selectedDest);
-          if (!result.success) {
-            alert("Failed to create project: " + result.error);
-            flashStatus(t("status.ready"));
-            return;
-          }
-
-          if (result.project) {
-            setProjectFolderPath(result.path);
-            resetProject(result.project);
-            flashStatus(t("status.project_created", { path: result.path }) || "Project created at " + result.path);
-          } else if (host.isTauri && result.path) {
-            const loaded = await host.loadProjectFromFolder(result.path);
-            if (loaded) {
-              setProjectFolderPath(result.path);
-              resetProject(loaded);
-              flashStatus(t("status.project_created", { path: result.path }) || "Project created at " + result.path);
+        {
+          label: t("dialog.create") || "Create",
+          primary: true,
+          onClick: async (close) => {
+            const projName = nameInput.value.trim();
+            const gameTitle = titleInput.value.trim() || projName;
+            if (!selectedDest) {
+              alert("Please select a destination folder.");
+              return;
             }
-          }
-        } },
+            if (!projName) {
+              alert("Please enter a project name.");
+              return;
+            }
+
+            close();
+            flashStatus("Creating project…");
+            const result = await createNewProject(
+              projName,
+              gameTitle,
+              selectedDest,
+            );
+            if (!result.success) {
+              alert("Failed to create project: " + result.error);
+              flashStatus(t("status.ready"));
+              return;
+            }
+
+            if (result.project) {
+              setProjectFolderPath(result.path);
+              resetProject(result.project);
+              flashStatus(
+                t("status.project_created", { path: result.path }) ||
+                  "Project created at " + result.path,
+              );
+            } else if (host.isTauri && result.path) {
+              const loaded = await host.loadProjectFromFolder(result.path);
+              if (loaded) {
+                setProjectFolderPath(result.path);
+                resetProject(loaded);
+                flashStatus(
+                  t("status.project_created", { path: result.path }) ||
+                    "Project created at " + result.path,
+                );
+              }
+            }
+          },
+        },
         { label: "btn.cancel" },
       ],
     });
@@ -435,12 +661,17 @@ const editorI18n = await createEditorI18n({
       return;
     }
 
-    const result = await openProjectFromFolder((project) => RA.migrateProject(project));
+    const result = await openProjectFromFolder((project) =>
+      RA.migrateProject(project),
+    );
     if (!result) return;
 
     setProjectFolderPath(result.path);
     resetProject(result.project);
-    flashStatus(t("status.project_loaded", { path: result.path }) || "Project loaded from " + result.path);
+    flashStatus(
+      t("status.project_loaded", { path: result.path }) ||
+        "Project loaded from " + result.path,
+    );
   }
 
   async function saveProjectFolderFlow() {
@@ -457,8 +688,12 @@ const editorI18n = await createEditorI18n({
     } else {
       const folder = await host.pickFolder();
       if (!folder) return;
-      const projName = sanitizeProjectName(proj.system.title || "project", "project");
-      const path = folder.replace(/\\/g, "/").replace(/\/$/, "") + "/" + projName;
+      const projName = sanitizeProjectName(
+        proj.system.title || "project",
+        "project",
+      );
+      const path =
+        folder.replace(/\\/g, "/").replace(/\/$/, "") + "/" + projName;
       setProjectFolderPath(path);
       const ok = await saveProjectToFolder(path, proj);
       if (ok) flashStatus("Project saved to folder.");
@@ -475,7 +710,8 @@ const editorI18n = await createEditorI18n({
     return li > a ? 0.45 : 1;
   }
   function effectivePass(x, y) {
-    const m = curMap(), i = y * m.width + x;
+    const m = curMap(),
+      i = y * m.width + x;
     const ov = m.passOv[i];
     if (ov === 1) return true;
     if (ov === 2) return false;
@@ -505,32 +741,45 @@ const editorI18n = await createEditorI18n({
     for (let y = 0; y < m.height; y++) {
       for (let x = 0; x < m.width; x++) {
         const ov = m.passOv[y * m.width + x];
-        const cx = x * TILE + TILE / 2, cy = y * TILE + TILE / 2, r = TILE * 0.24;
-        if (ov) { // yellow corner badge marks an override
+        const cx = x * TILE + TILE / 2,
+          cy = y * TILE + TILE / 2,
+          r = TILE * 0.24;
+        if (ov) {
+          // yellow corner badge marks an override
           g.fillStyle = "#ffd86a";
-          g.beginPath(); g.moveTo(x * TILE, y * TILE); g.lineTo(x * TILE + 13, y * TILE); g.lineTo(x * TILE, y * TILE + 13); g.fill();
+          g.beginPath();
+          g.moveTo(x * TILE, y * TILE);
+          g.lineTo(x * TILE + 13, y * TILE);
+          g.lineTo(x * TILE, y * TILE + 13);
+          g.fill();
         }
         if (effectivePass(x, y)) {
           g.strokeStyle = ov ? "#ffd86a" : "rgba(140,235,160,0.9)";
-          g.beginPath(); g.arc(cx, cy, r, 0, 7); g.stroke();
+          g.beginPath();
+          g.arc(cx, cy, r, 0, 7);
+          g.stroke();
         } else {
           g.strokeStyle = ov ? "#ffd86a" : "rgba(255,110,110,0.9)";
           g.beginPath();
-          g.moveTo(cx - r, cy - r); g.lineTo(cx + r, cy + r);
-          g.moveTo(cx + r, cy - r); g.lineTo(cx - r, cy + r);
+          g.moveTo(cx - r, cy - r);
+          g.lineTo(cx + r, cy + r);
+          g.moveTo(cx + r, cy - r);
+          g.lineTo(cx - r, cy + r);
           g.stroke();
         }
       }
     }
   }
   function drawHeightOverlay(g, m) {
-    g.textAlign = "center"; g.textBaseline = "middle";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
     g.font = "bold 18px monospace";
     for (let y = 0; y < m.height; y++) {
       for (let x = 0; x < m.width; x++) {
         const hv = (m.heights && m.heights[y * m.width + x]) || 0;
         if (!hv) continue;
-        g.fillStyle = "rgba(110,160,255," + Math.min(0.16 + hv * 0.09, 0.55) + ")";
+        g.fillStyle =
+          "rgba(110,160,255," + Math.min(0.16 + hv * 0.09, 0.55) + ")";
         g.fillRect(x * TILE, y * TILE, TILE, TILE);
         g.fillStyle = "#eaf2ff";
         g.fillText(String(hv), x * TILE + TILE / 2, y * TILE + TILE / 2 + 1);
@@ -549,7 +798,12 @@ const editorI18n = await createEditorI18n({
           g.strokeStyle = "rgba(255,100,100,0.7)";
           g.lineWidth = 1.5 / zoom;
           g.strokeRect(x * TILE + 1, y * TILE + 1, TILE - 2, TILE - 2);
-          if (collisionEditCell && collisionEditCell.x === x && collisionEditCell.y === y && collisionEditRect) {
+          if (
+            collisionEditCell &&
+            collisionEditCell.x === x &&
+            collisionEditCell.y === y &&
+            collisionEditRect
+          ) {
             const r = collisionEditRect;
             g.fillStyle = "rgba(100,200,255,0.3)";
             g.fillRect(x * TILE + r.x, y * TILE + r.y, r.w, r.h);
@@ -566,8 +820,13 @@ const editorI18n = await createEditorI18n({
       const mask = masks[mi];
       if (!mask) continue;
       const isSelected = selectedMask && selectedMask.index === mi;
-      const rx = mask.x, ry = mask.y, rw = mask.w, rh = mask.h;
-      g.fillStyle = isSelected ? "rgba(255,200,80,0.22)" : "rgba(80,160,255,0.18)";
+      const rx = mask.x,
+        ry = mask.y,
+        rw = mask.w,
+        rh = mask.h;
+      g.fillStyle = isSelected
+        ? "rgba(255,200,80,0.22)"
+        : "rgba(80,160,255,0.18)";
       g.fillRect(rx, ry, rw, rh);
       g.strokeStyle = isSelected ? "#ffc850" : "#50a0ff";
       g.lineWidth = 2 / zoom;
@@ -576,9 +835,14 @@ const editorI18n = await createEditorI18n({
         const hs = Math.max(10, TILE * 0.12);
         const half = hs / 2;
         const pts = [
-          [rx, ry, "nw"], [rx + rw / 2, ry, "n"], [rx + rw, ry, "ne"],
-          [rx + rw, ry + rh / 2, "e"], [rx + rw, ry + rh, "se"],
-          [rx + rw / 2, ry + rh, "s"], [rx, ry + rh, "sw"], [rx, ry + rh / 2, "w"],
+          [rx, ry, "nw"],
+          [rx + rw / 2, ry, "n"],
+          [rx + rw, ry, "ne"],
+          [rx + rw, ry + rh / 2, "e"],
+          [rx + rw, ry + rh, "se"],
+          [rx + rw / 2, ry + rh, "s"],
+          [rx, ry + rh, "sw"],
+          [rx, ry + rh / 2, "w"],
         ];
         g.fillStyle = "#ffc850";
         for (const p of pts) g.fillRect(p[0] - half, p[1] - half, hs, hs);
@@ -619,16 +883,18 @@ const editorI18n = await createEditorI18n({
       return 0;
     }
     const ln = layer === "auto" ? topLayerAt(cell.x, cell.y) : layer;
-    const tid = getCell(cell.x, cell.y, ln) || getCell(cell.x, cell.y, "ground");
+    const tid =
+      getCell(cell.x, cell.y, ln) || getCell(cell.x, cell.y, "ground");
     return flagsOfTile(tid);
   }
   function drawFlagsOverlay(g, m) {
     g.lineWidth = 2.5 / Math.max(zoom, 0.4);
     for (let y = 0; y < m.height; y++) {
       for (let x = 0; x < m.width; x++) {
-        const flags = flagsOfPlacement({x, y}, m);
+        const flags = flagsOfPlacement({ x, y }, m);
         if (!flags) continue;
-        const cx = x * TILE, cy = y * TILE;
+        const cx = x * TILE,
+          cy = y * TILE;
         const passage = flags & Assets.TF_PASS_MASK;
         // passage badge on the tile
         if (passage === Assets.TF_PASS_X) {
@@ -644,14 +910,27 @@ const editorI18n = await createEditorI18n({
         } else if (passage === Assets.TF_PASS_STAR) {
           g.fillStyle = "#ffd86a";
           g.font = "bold 14px monospace";
-          g.textAlign = "center"; g.textBaseline = "middle";
+          g.textAlign = "center";
+          g.textBaseline = "middle";
           g.fillText("★", cx + TILE / 2, cy + TILE / 2);
         }
         // directional blockers
-        if (flags & Assets.TF_DIR_N) { g.fillStyle = "#ff6644"; g.fillRect(cx + 14, cy + 2, 20, 6); }
-        if (flags & Assets.TF_DIR_S) { g.fillStyle = "#ff6644"; g.fillRect(cx + 14, cy + TILE - 8, 20, 6); }
-        if (flags & Assets.TF_DIR_W) { g.fillStyle = "#ff6644"; g.fillRect(cx + 2, cy + 14, 6, 20); }
-        if (flags & Assets.TF_DIR_E) { g.fillStyle = "#ff6644"; g.fillRect(cx + TILE - 8, cy + 14, 6, 20); }
+        if (flags & Assets.TF_DIR_N) {
+          g.fillStyle = "#ff6644";
+          g.fillRect(cx + 14, cy + 2, 20, 6);
+        }
+        if (flags & Assets.TF_DIR_S) {
+          g.fillStyle = "#ff6644";
+          g.fillRect(cx + 14, cy + TILE - 8, 20, 6);
+        }
+        if (flags & Assets.TF_DIR_W) {
+          g.fillStyle = "#ff6644";
+          g.fillRect(cx + 2, cy + 14, 6, 20);
+        }
+        if (flags & Assets.TF_DIR_E) {
+          g.fillStyle = "#ff6644";
+          g.fillRect(cx + TILE - 8, cy + 14, 6, 20);
+        }
         // special flag badges
         let badge = 0;
         if (flags & Assets.TF_LADDER) badge++;
@@ -659,17 +938,33 @@ const editorI18n = await createEditorI18n({
         if (flags & Assets.TF_COUNTER) badge++;
         if (flags & Assets.TF_DAMAGE) badge++;
         if (badge) {
-          g.font = "10px monospace"; g.textAlign = "left"; g.textBaseline = "top";
-          if (flags & Assets.TF_LADDER) { g.fillStyle = "#8a6af0"; g.fillText("L", cx + 2, cy + 2); }
-          if (flags & Assets.TF_BUSH) { g.fillStyle = "#6ab84a"; g.fillText("B", cx + 12, cy + 2); }
-          if (flags & Assets.TF_COUNTER) { g.fillStyle = "#f0a030"; g.fillText("C", cx + 22, cy + 2); }
-          if (flags & Assets.TF_DAMAGE) { g.fillStyle = "#f06060"; g.fillText("D", cx + 32, cy + 2); }
+          g.font = "10px monospace";
+          g.textAlign = "left";
+          g.textBaseline = "top";
+          if (flags & Assets.TF_LADDER) {
+            g.fillStyle = "#8a6af0";
+            g.fillText("L", cx + 2, cy + 2);
+          }
+          if (flags & Assets.TF_BUSH) {
+            g.fillStyle = "#6ab84a";
+            g.fillText("B", cx + 12, cy + 2);
+          }
+          if (flags & Assets.TF_COUNTER) {
+            g.fillStyle = "#f0a030";
+            g.fillText("C", cx + 22, cy + 2);
+          }
+          if (flags & Assets.TF_DAMAGE) {
+            g.fillStyle = "#f06060";
+            g.fillText("D", cx + 32, cy + 2);
+          }
         }
         // terrain tag
         const tag = (flags & Assets.TF_TERRAIN_MASK) >> Assets.TF_TERRAIN_SHIFT;
         if (tag) {
           g.fillStyle = "#80c0ff";
-          g.font = "10px monospace"; g.textAlign = "right"; g.textBaseline = "bottom";
+          g.font = "10px monospace";
+          g.textAlign = "right";
+          g.textBaseline = "bottom";
           g.fillText("T" + tag, cx + TILE - 2, cy + TILE - 2);
         }
       }
@@ -689,7 +984,7 @@ const editorI18n = await createEditorI18n({
       const si = tileSubIndex(tile);
       if (si < 0) return;
       let cur = Assets.getTileFlags(tile.tileset, si);
-      if (mask === 0xFFFFFFFF) {
+      if (mask === 0xffffffff) {
         cur = value;
       } else {
         cur = (cur & ~mask) | (value & mask);
@@ -697,20 +992,22 @@ const editorI18n = await createEditorI18n({
       Assets.setTileFlags(tile.tileset, si, cur);
     } else {
       const ln = layer === "auto" ? topLayerAt(cell.x, cell.y) : layer;
-      const tid = getCell(cell.x, cell.y, ln) || getCell(cell.x, cell.y, "ground");
+      const tid =
+        getCell(cell.x, cell.y, ln) || getCell(cell.x, cell.y, "ground");
       const tile = Assets.tiles[tid];
       if (!tile || !tile.tileset) return;
       const si = tileSubIndex(tile);
       if (si < 0) return;
       let cur = Assets.getTileFlags(tile.tileset, si);
-      if (mask === 0xFFFFFFFF) {
+      if (mask === 0xffffffff) {
         cur = value;
       } else {
         cur = (cur & ~mask) | (value & mask);
       }
       Assets.setTileFlags(tile.tileset, si, cur);
     }
-    touch(); renderMap();
+    touch();
+    renderMap();
   }
 
   function renderMap() {
@@ -734,7 +1031,12 @@ const editorI18n = await createEditorI18n({
         for (const p of sorted) {
           Assets.drawTile(g, p.tileId, p.x, p.y);
           // highlight selected placement
-          if (selectedPlacement && selectedPlacement.placement && selectedPlacement.placement.id === p.id && selectedPlacement.layer === ln) {
+          if (
+            selectedPlacement &&
+            selectedPlacement.placement &&
+            selectedPlacement.placement.id === p.id &&
+            selectedPlacement.layer === ln
+          ) {
             g.strokeStyle = "#7ac8ff";
             g.lineWidth = 2;
             g.strokeRect(p.x + 1, p.y + 1, TILE - 2, TILE - 2);
@@ -750,8 +1052,14 @@ const editorI18n = await createEditorI18n({
       g.strokeStyle = "rgba(255,255,255,0.09)";
       g.lineWidth = 1 / zoom;
       g.beginPath();
-      for (let x = 0; x <= m.width; x++) { g.moveTo(x * TILE, 0); g.lineTo(x * TILE, m.height * TILE); }
-      for (let y = 0; y <= m.height; y++) { g.moveTo(0, y * TILE); g.lineTo(m.width * TILE, y * TILE); }
+      for (let x = 0; x <= m.width; x++) {
+        g.moveTo(x * TILE, 0);
+        g.lineTo(x * TILE, m.height * TILE);
+      }
+      for (let y = 0; y <= m.height; y++) {
+        g.moveTo(0, y * TILE);
+        g.lineTo(m.width * TILE, y * TILE);
+      }
       g.stroke();
       if (mode === "pass") drawPassOverlay(g, m);
       if (mode === "height") drawHeightOverlay(g, m);
@@ -760,37 +1068,69 @@ const editorI18n = await createEditorI18n({
       // events in grid-free mode
       if (mode === "event" || mode === "start") {
         for (const ev of m.events) {
-          g.fillStyle = ev === selectedEvent ? "rgba(120,200,255,0.35)" : "rgba(255,255,255,0.14)";
+          g.fillStyle =
+            ev === selectedEvent
+              ? "rgba(120,200,255,0.35)"
+              : "rgba(255,255,255,0.14)";
           g.fillRect(ev.x * TILE + 2, ev.y * TILE + 2, TILE - 4, TILE - 4);
-          g.strokeStyle = ev === selectedEvent ? "#7ac8ff" : "rgba(255,255,255,0.6)";
+          g.strokeStyle =
+            ev === selectedEvent ? "#7ac8ff" : "rgba(255,255,255,0.6)";
           g.lineWidth = 2 / zoom;
           g.strokeRect(ev.x * TILE + 2, ev.y * TILE + 2, TILE - 4, TILE - 4);
           const pg = ev.pages[0];
           if (pg && pg.charset) {
             const ci = Assets.charsetIndex(pg.charset);
-            if (ci >= 0) Assets.drawChar(g, ci, pg.dir || 0, 1, ev.x * TILE, ev.y * TILE - 6);
+            if (ci >= 0)
+              Assets.drawChar(
+                g,
+                ci,
+                pg.dir || 0,
+                1,
+                ev.x * TILE,
+                ev.y * TILE - 6,
+              );
           }
         }
       }
       // start marker
       if (proj.system.startMapId === m.id) {
         g.fillStyle = "rgba(110,230,140,0.8)";
-        g.fillRect(proj.system.startX * TILE + 8, proj.system.startY * TILE + 8, TILE - 16, TILE - 16);
+        g.fillRect(
+          proj.system.startX * TILE + 8,
+          proj.system.startY * TILE + 8,
+          TILE - 16,
+          TILE - 16,
+        );
         g.fillStyle = "#0c2c14";
         g.font = "bold 22px monospace";
-        g.textAlign = "center"; g.textBaseline = "middle";
-        g.fillText("S", proj.system.startX * TILE + TILE / 2, proj.system.startY * TILE + TILE / 2 + 1);
+        g.textAlign = "center";
+        g.textBaseline = "middle";
+        g.fillText(
+          "S",
+          proj.system.startX * TILE + TILE / 2,
+          proj.system.startY * TILE + TILE / 2 + 1,
+        );
       }
       // hover preview in grid-free mode
       if (hoverCell && !pasteMode && mode === "map") {
         // show a ghost of the selected tile at cursor
         if (!dragPlacement) {
           g.globalAlpha = 0.5;
-          Assets.drawTile(g, selectedTile, hoverCell.x * TILE, hoverCell.y * TILE);
+          Assets.drawTile(
+            g,
+            selectedTile,
+            hoverCell.x * TILE,
+            hoverCell.y * TILE,
+          );
           g.globalAlpha = 1;
           g.strokeStyle = "#ffffff";
           g.lineWidth = 2 / zoom;
-          g.strokeRect(hoverCell.x * TILE + 1, hoverCell.y * TILE + 1, TILE - 2, TILE - 2);
+          g.strokeRect(
+            hoverCell.x * TILE + 1,
+            hoverCell.y * TILE + 1,
+            TILE - 2,
+            TILE - 2,
+          );
         }
       }
       return; // skip legacy rendering below
@@ -805,7 +1145,8 @@ const editorI18n = await createEditorI18n({
           Assets.drawTile(g, arr[y * m.width + x], x * TILE, y * TILE);
         }
       }
-      if (li === 2) { // shadows sit under the overhead layer, as in-game
+      if (li === 2) {
+        // shadows sit under the overhead layer, as in-game
         g.globalAlpha = 1;
         drawShadows(g, m);
       }
@@ -815,8 +1156,14 @@ const editorI18n = await createEditorI18n({
     g.strokeStyle = "rgba(255,255,255,0.09)";
     g.lineWidth = 1 / zoom;
     g.beginPath();
-    for (let x = 0; x <= m.width; x++) { g.moveTo(x * TILE, 0); g.lineTo(x * TILE, m.height * TILE); }
-    for (let y = 0; y <= m.height; y++) { g.moveTo(0, y * TILE); g.lineTo(m.width * TILE, y * TILE); }
+    for (let x = 0; x <= m.width; x++) {
+      g.moveTo(x * TILE, 0);
+      g.lineTo(x * TILE, m.height * TILE);
+    }
+    for (let y = 0; y <= m.height; y++) {
+      g.moveTo(0, y * TILE);
+      g.lineTo(m.width * TILE, y * TILE);
+    }
     g.stroke();
     if (mode === "pass") drawPassOverlay(g, m);
     if (mode === "height") drawHeightOverlay(g, m);
@@ -825,33 +1172,57 @@ const editorI18n = await createEditorI18n({
     // events
     if (mode === "event" || mode === "start") {
       for (const ev of m.events) {
-        g.fillStyle = ev === selectedEvent ? "rgba(120,200,255,0.35)" : "rgba(255,255,255,0.14)";
+        g.fillStyle =
+          ev === selectedEvent
+            ? "rgba(120,200,255,0.35)"
+            : "rgba(255,255,255,0.14)";
         g.fillRect(ev.x * TILE + 2, ev.y * TILE + 2, TILE - 4, TILE - 4);
-        g.strokeStyle = ev === selectedEvent ? "#7ac8ff" : "rgba(255,255,255,0.6)";
+        g.strokeStyle =
+          ev === selectedEvent ? "#7ac8ff" : "rgba(255,255,255,0.6)";
         g.lineWidth = 2 / zoom;
         g.strokeRect(ev.x * TILE + 2, ev.y * TILE + 2, TILE - 4, TILE - 4);
         const pg = ev.pages[0];
         if (pg && pg.charset) {
           const ci = Assets.charsetIndex(pg.charset);
-          if (ci >= 0) Assets.drawChar(g, ci, pg.dir || 0, 1, ev.x * TILE, ev.y * TILE - 6);
+          if (ci >= 0)
+            Assets.drawChar(
+              g,
+              ci,
+              pg.dir || 0,
+              1,
+              ev.x * TILE,
+              ev.y * TILE - 6,
+            );
         }
       }
     }
     // start marker
     if (proj.system.startMapId === m.id) {
       g.fillStyle = "rgba(110,230,140,0.8)";
-      g.fillRect(proj.system.startX * TILE + 8, proj.system.startY * TILE + 8, TILE - 16, TILE - 16);
+      g.fillRect(
+        proj.system.startX * TILE + 8,
+        proj.system.startY * TILE + 8,
+        TILE - 16,
+        TILE - 16,
+      );
       g.fillStyle = "#0c2c14";
       g.font = "bold 22px monospace";
-      g.textAlign = "center"; g.textBaseline = "middle";
-      g.fillText("S", proj.system.startX * TILE + TILE / 2, proj.system.startY * TILE + TILE / 2 + 1);
+      g.textAlign = "center";
+      g.textBaseline = "middle";
+      g.fillText(
+        "S",
+        proj.system.startX * TILE + TILE / 2,
+        proj.system.startY * TILE + TILE / 2 + 1,
+      );
     }
     // selection marquee
     if (mode === "map" && selection) {
-      const w = (selection.x2 - selection.x1 + 1) * TILE, h2 = (selection.y2 - selection.y1 + 1) * TILE;
+      const w = (selection.x2 - selection.x1 + 1) * TILE,
+        h2 = (selection.y2 - selection.y1 + 1) * TILE;
       g.fillStyle = "rgba(255,216,106,0.12)";
       g.fillRect(selection.x1 * TILE, selection.y1 * TILE, w, h2);
-      g.strokeStyle = "#ffd86a"; g.lineWidth = 2 / zoom;
+      g.strokeStyle = "#ffd86a";
+      g.lineWidth = 2 / zoom;
       g.setLineDash([10, 6]);
       g.strokeRect(selection.x1 * TILE, selection.y1 * TILE, w, h2);
       g.setLineDash([]);
@@ -862,43 +1233,94 @@ const editorI18n = await createEditorI18n({
       for (let dy = 0; dy < clipTiles.h; dy++) {
         for (let dx = 0; dx < clipTiles.w; dx++) {
           const si = dy * clipTiles.w + dx;
-          for (const ln of LAYER_ORDER) Assets.drawTile(g, clipTiles.layers[ln][si], (hoverCell.x + dx) * TILE, (hoverCell.y + dy) * TILE);
+          for (const ln of LAYER_ORDER)
+            Assets.drawTile(
+              g,
+              clipTiles.layers[ln][si],
+              (hoverCell.x + dx) * TILE,
+              (hoverCell.y + dy) * TILE,
+            );
         }
       }
       g.globalAlpha = 1;
-      g.strokeStyle = "#ffd86a"; g.lineWidth = 2 / zoom;
-      g.strokeRect(hoverCell.x * TILE, hoverCell.y * TILE, clipTiles.w * TILE, clipTiles.h * TILE);
+      g.strokeStyle = "#ffd86a";
+      g.lineWidth = 2 / zoom;
+      g.strokeRect(
+        hoverCell.x * TILE,
+        hoverCell.y * TILE,
+        clipTiles.w * TILE,
+        clipTiles.h * TILE,
+      );
     }
     if (pasteMode === "event" && hoverCell && mode === "event") {
-      g.strokeStyle = "#ffd86a"; g.lineWidth = 2 / zoom;
-      g.strokeRect(hoverCell.x * TILE + 2, hoverCell.y * TILE + 2, TILE - 4, TILE - 4);
+      g.strokeStyle = "#ffd86a";
+      g.lineWidth = 2 / zoom;
+      g.strokeRect(
+        hoverCell.x * TILE + 2,
+        hoverCell.y * TILE + 2,
+        TILE - 4,
+        TILE - 4,
+      );
     }
     // hover / drag previews
     if (hoverCell && !pasteMode) {
-      if ((tool === "rect" || tool === "circle") && rectStart && painting && (mode === "map" || mode === "height")) {
+      if (
+        (tool === "rect" || tool === "circle") &&
+        rectStart &&
+        painting &&
+        (mode === "map" || mode === "height")
+      ) {
         const r2 = normRect(rectStart, hoverCell);
         g.strokeStyle = "#ffd86a";
         g.lineWidth = 2 / zoom;
         if (tool === "rect") {
-          g.strokeRect(r2.x1 * TILE, r2.y1 * TILE, (r2.x2 - r2.x1 + 1) * TILE, (r2.y2 - r2.y1 + 1) * TILE);
+          g.strokeRect(
+            r2.x1 * TILE,
+            r2.y1 * TILE,
+            (r2.x2 - r2.x1 + 1) * TILE,
+            (r2.y2 - r2.y1 + 1) * TILE,
+          );
         } else {
           g.beginPath();
-          g.ellipse((r2.x1 + r2.x2 + 1) / 2 * TILE, (r2.y1 + r2.y2 + 1) / 2 * TILE,
-            (r2.x2 - r2.x1 + 1) / 2 * TILE, (r2.y2 - r2.y1 + 1) / 2 * TILE, 0, 0, 7);
+          g.ellipse(
+            ((r2.x1 + r2.x2 + 1) / 2) * TILE,
+            ((r2.y1 + r2.y2 + 1) / 2) * TILE,
+            ((r2.x2 - r2.x1 + 1) / 2) * TILE,
+            ((r2.y2 - r2.y1 + 1) / 2) * TILE,
+            0,
+            0,
+            7,
+          );
           g.stroke();
         }
       } else if (tool === "shadow" && mode === "map" && hoverQuad) {
         const H = TILE / 2;
-        const qx = (hoverQuad === 2 || hoverQuad === 8) ? 1 : 0;
+        const qx = hoverQuad === 2 || hoverQuad === 8 ? 1 : 0;
         const qy = hoverQuad >= 4 ? 1 : 0;
         g.fillStyle = "rgba(255,216,106,0.35)";
-        g.fillRect(hoverCell.x * TILE + qx * H, hoverCell.y * TILE + qy * H, H, H);
-        g.strokeStyle = "#ffffff"; g.lineWidth = 2 / zoom;
-        g.strokeRect(hoverCell.x * TILE + 1, hoverCell.y * TILE + 1, TILE - 2, TILE - 2);
+        g.fillRect(
+          hoverCell.x * TILE + qx * H,
+          hoverCell.y * TILE + qy * H,
+          H,
+          H,
+        );
+        g.strokeStyle = "#ffffff";
+        g.lineWidth = 2 / zoom;
+        g.strokeRect(
+          hoverCell.x * TILE + 1,
+          hoverCell.y * TILE + 1,
+          TILE - 2,
+          TILE - 2,
+        );
       } else {
         g.strokeStyle = "#ffffff";
         g.lineWidth = 2 / zoom;
-        g.strokeRect(hoverCell.x * TILE + 1, hoverCell.y * TILE + 1, TILE - 2, TILE - 2);
+        g.strokeRect(
+          hoverCell.x * TILE + 1,
+          hoverCell.y * TILE + 1,
+          TILE - 2,
+          TILE - 2,
+        );
       }
     }
   }
@@ -913,15 +1335,48 @@ const editorI18n = await createEditorI18n({
     // build tabs
     const tabBar = h("div", { class: "pal-tabs" });
     const tilesetKeys = Object.keys(Assets.tilesets || {});
-    const allBtn = h("button", { class: "pal-tab" + (paletteTab === "all" ? " sel" : ""), onclick() { paletteTab = "all"; rebuildPalTabs(); renderPalette(); } }, "All");
+    const allBtn = h(
+      "button",
+      {
+        class: "pal-tab" + (paletteTab === "all" ? " sel" : ""),
+        onclick() {
+          paletteTab = "all";
+          rebuildPalTabs();
+          renderPalette();
+        },
+      },
+      "All",
+    );
     tabBar.appendChild(allBtn);
     for (const key of tilesetKeys) {
       const ts = Assets.tilesets[key];
       if (!ts || !ts.tileIds || !ts.tileIds.length) continue;
-      const btn = h("button", { class: "pal-tab" + (paletteTab === key ? " sel" : ""), onclick() { paletteTab = key; rebuildPalTabs(); renderPalette(); } }, key);
+      const btn = h(
+        "button",
+        {
+          class: "pal-tab" + (paletteTab === key ? " sel" : ""),
+          onclick() {
+            paletteTab = key;
+            rebuildPalTabs();
+            renderPalette();
+          },
+        },
+        key,
+      );
       tabBar.appendChild(btn);
     }
-    const todayBtn = h("button", { class: "pal-tab" + (paletteTab === "today" ? " sel" : ""), onclick() { paletteTab = "today"; rebuildPalTabs(); renderPalette(); } }, "Today");
+    const todayBtn = h(
+      "button",
+      {
+        class: "pal-tab" + (paletteTab === "today" ? " sel" : ""),
+        onclick() {
+          paletteTab = "today";
+          rebuildPalTabs();
+          renderPalette();
+        },
+      },
+      "Today",
+    );
     tabBar.appendChild(todayBtn);
     wrap.insertBefore(tabBar, palCanvas);
   }
@@ -945,19 +1400,31 @@ const editorI18n = await createEditorI18n({
     const tile = Assets.tiles[kindGroup.tileIds[0]];
     if (!tile) return;
     const img = tile.image;
-    const spec = Assets.MZ_TILESET_SPECS ? Assets.MZ_TILESET_SPECS[ts.category] : null;
+    const spec = Assets.MZ_TILESET_SPECS
+      ? Assets.MZ_TILESET_SPECS[ts.category]
+      : null;
     if (!spec || !spec.autotile || !img) {
       // fallback: just draw the first subtile
       Assets.drawTile(g, kindGroup.tileIds[0], dx, dy);
       return;
     }
-    const kindCol = tile.tilesetX >= 0 ? Math.floor(tile.tilesetX / (spec.kindW || 1)) : 0;
-    const kindRow = tile.tilesetY >= 0 ? Math.floor(tile.tilesetY / (spec.kindH || 1)) : 0;
+    const kindCol =
+      tile.tilesetX >= 0 ? Math.floor(tile.tilesetX / (spec.kindW || 1)) : 0;
+    const kindRow =
+      tile.tilesetY >= 0 ? Math.floor(tile.tilesetY / (spec.kindH || 1)) : 0;
     const ox = kindCol * (spec.kindW || 1) * TILE;
     const oy = kindRow * (spec.kindH || 1) * TILE;
     // For floor/wall autotiles, compose the "fully surrounded" shape (all neighbors present)
     if (spec.autotile === "floor") {
-      const composed = Assets.composeFloorAutotile(img, ox / 24, oy / 24, 4, 4, 4, 4);
+      const composed = Assets.composeFloorAutotile(
+        img,
+        ox / 24,
+        oy / 24,
+        4,
+        4,
+        4,
+        4,
+      );
       g.drawImage(composed, dx, dy);
     } else if (spec.autotile === "wall") {
       const composed = Assets.composeWallAutotile(img, ox / 24, oy / 24, 15);
@@ -976,16 +1443,16 @@ const editorI18n = await createEditorI18n({
     // filter tiles based on active tab
     let visibleTiles = [];
     let paletteKindMode = false; // true when showing autotile kind preview
-    let paletteKindGrid = [];    // kind preview data
+    let paletteKindGrid = []; // kind preview data
     const allTiles = Assets.tiles;
     if (paletteTab === "all") {
-      visibleTiles = allTiles.map((t, i) => i).filter(i => t && t.key);
+      visibleTiles = allTiles.map((t, i) => i).filter((i) => t && t.key);
     } else if (paletteTab === "today") {
       const m = curMap();
       const usedIds = new Set();
       if (m && m.tilePlacements) {
         for (const ln of LAYER_ORDER) {
-          for (const p of (m.tilePlacements[ln] || [])) usedIds.add(p.tileId);
+          for (const p of m.tilePlacements[ln] || []) usedIds.add(p.tileId);
         }
       }
       if (m && m.layers) {
@@ -995,7 +1462,9 @@ const editorI18n = await createEditorI18n({
           }
         }
       }
-      visibleTiles = allTiles.map((t, i) => i).filter(i => t && usedIds.has(i));
+      visibleTiles = allTiles
+        .map((t, i) => i)
+        .filter((i) => t && usedIds.has(i));
     } else {
       // specific tileset tab
       const ts = Assets.tilesets[paletteTab];
@@ -1006,12 +1475,14 @@ const editorI18n = await createEditorI18n({
           // ---- autotile kind preview mode ----
           paletteKindMode = true;
           paletteKindGrid = computeKindPreview(ts);
-          visibleTiles = paletteKindGrid.map(g2 => g2.tileIds[0]).filter(id => id != null && allTiles[id]);
+          visibleTiles = paletteKindGrid
+            .map((g2) => g2.tileIds[0])
+            .filter((id) => id != null && allTiles[id]);
         } else {
-          visibleTiles = ts.tileIds.filter(id => id != null && allTiles[id]);
+          visibleTiles = ts.tileIds.filter((id) => id != null && allTiles[id]);
         }
       } else {
-        visibleTiles = allTiles.map((t, i) => i).filter(i => t && t.key);
+        visibleTiles = allTiles.map((t, i) => i).filter((i) => t && t.key);
       }
     }
     // For B-E / non-autotile tilesets: expand tiles per tileset column count
@@ -1042,7 +1513,8 @@ const editorI18n = await createEditorI18n({
         // highlight if the kind's first tile is selected
         const firstId = kg.tileIds[0];
         if (firstId != null && kg.tileIds.indexOf(selectedTile) >= 0) {
-          g.strokeStyle = "#ffd86a"; g.lineWidth = 3;
+          g.strokeStyle = "#ffd86a";
+          g.lineWidth = 3;
           g.strokeRect(cx + 2, cy + 2, TILE - 4, TILE - 4);
         }
         // label with kind index
@@ -1050,7 +1522,8 @@ const editorI18n = await createEditorI18n({
         g.fillRect(cx + 1, cy + 1, 14, 11);
         g.fillStyle = "#fff";
         g.font = "9px monospace";
-        g.textAlign = "left"; g.textBaseline = "top";
+        g.textAlign = "left";
+        g.textBaseline = "top";
         g.fillText("K" + kg.kindIndex, cx + 2, cy + 2);
       }
     } else {
@@ -1061,7 +1534,8 @@ const editorI18n = await createEditorI18n({
         const cy = Math.floor(i / cols) * TILE;
         Assets.drawTile(g, id, cx, cy);
         if (id === selectedTile) {
-          g.strokeStyle = "#ffd86a"; g.lineWidth = 3;
+          g.strokeStyle = "#ffd86a";
+          g.lineWidth = 3;
           g.strokeRect(cx + 2, cy + 2, TILE - 4, TILE - 4);
         }
       }
@@ -1070,13 +1544,20 @@ const editorI18n = await createEditorI18n({
         const ts3 = Assets.tilesets[paletteTab];
         if (ts3 && !/^A[1-5]$/i.test(ts3.category || "")) {
           const sc = ts3 ? ts3.cols : Assets.PALETTE_COLS;
-          const x1 = Math.min(paletteMarqueeStart.col, paletteMarqueeEnd.col) * TILE;
-          const y1 = Math.min(paletteMarqueeStart.row, paletteMarqueeEnd.row) * TILE;
-          const x2 = (Math.max(paletteMarqueeStart.col, paletteMarqueeEnd.col) + 1) * TILE;
-          const y2 = (Math.max(paletteMarqueeStart.row, paletteMarqueeEnd.row) + 1) * TILE;
+          const x1 =
+            Math.min(paletteMarqueeStart.col, paletteMarqueeEnd.col) * TILE;
+          const y1 =
+            Math.min(paletteMarqueeStart.row, paletteMarqueeEnd.row) * TILE;
+          const x2 =
+            (Math.max(paletteMarqueeStart.col, paletteMarqueeEnd.col) + 1) *
+            TILE;
+          const y2 =
+            (Math.max(paletteMarqueeStart.row, paletteMarqueeEnd.row) + 1) *
+            TILE;
           g.fillStyle = "rgba(255,216,106,0.12)";
           g.fillRect(x1, y1, x2 - x1, y2 - y1);
-          g.strokeStyle = "#ffd86a"; g.lineWidth = 2;
+          g.strokeStyle = "#ffd86a";
+          g.lineWidth = 2;
           g.setLineDash([4, 4]);
           g.strokeRect(x1, y1, x2 - x1, y2 - y1);
           g.setLineDash([]);
@@ -1096,13 +1577,19 @@ const editorI18n = await createEditorI18n({
   }
   function quadFromMouse(e) {
     const r = mapCanvas.getBoundingClientRect();
-    const fx = (e.clientX - r.left) / (TILE * zoom), fy = (e.clientY - r.top) / (TILE * zoom);
-    const qx = (fx - Math.floor(fx)) >= 0.5 ? 1 : 0;
-    const qy = (fy - Math.floor(fy)) >= 0.5 ? 1 : 0;
+    const fx = (e.clientX - r.left) / (TILE * zoom),
+      fy = (e.clientY - r.top) / (TILE * zoom);
+    const qx = fx - Math.floor(fx) >= 0.5 ? 1 : 0;
+    const qy = fy - Math.floor(fy) >= 0.5 ? 1 : 0;
     return 1 << (qy * 2 + qx);
   }
   function normRect(a, b) {
-    return { x1: Math.min(a.x, b.x), y1: Math.min(a.y, b.y), x2: Math.max(a.x, b.x), y2: Math.max(a.y, b.y) };
+    return {
+      x1: Math.min(a.x, b.x),
+      y1: Math.min(a.y, b.y),
+      x2: Math.max(a.x, b.x),
+      y2: Math.max(a.y, b.y),
+    };
   }
   function pixelFromMouse(e) {
     const r = mapCanvas.getBoundingClientRect();
@@ -1118,7 +1605,7 @@ const editorI18n = await createEditorI18n({
     if (!m || !m.tilePlacements) return null;
     const layers = layer ? [layer] : LAYER_ORDER;
     for (const ln of layers) {
-      for (const p of (m.tilePlacements[ln] || [])) {
+      for (const p of m.tilePlacements[ln] || []) {
         if (px >= p.x && px < p.x + TILE && py >= p.y && py < p.y + TILE) {
           return { placement: p, layer: ln };
         }
@@ -1145,16 +1632,25 @@ const editorI18n = await createEditorI18n({
   function applySnapshot(s) {
     const m = RA.byId(proj.maps, s.mapId);
     if (!m) return;
-    m.layers = s.layers; m.shadows = s.shadows; m.passOv = s.passOv; m.heights = s.heights; m.events = s.events;
+    m.layers = s.layers;
+    m.shadows = s.shadows;
+    m.passOv = s.passOv;
+    m.heights = s.heights;
+    m.events = s.events;
     if (s.collision) m.collision = s.collision;
     if (s.tilePlacements) m.tilePlacements = s.tilePlacements;
     if (s.gridFree != null) m.gridFree = s.gridFree;
-    if (curMapId !== s.mapId) { curMapId = s.mapId; rebuildMapList(); }
+    if (curMapId !== s.mapId) {
+      curMapId = s.mapId;
+      rebuildMapList();
+    }
     selectedEvent = null;
     selectedPlacement = null;
     dragPlacement = false;
     dragPlacementObj = null;
-    touch(); renderMap(); refreshToolbar();
+    touch();
+    renderMap();
+    refreshToolbar();
   }
   function pushUndo() {
     undoStack.push(snapshotOf(curMapId));
@@ -1164,13 +1660,19 @@ const editorI18n = await createEditorI18n({
   }
   function undo() {
     const u = undoStack.pop();
-    if (!u) { flashStatus(t("status.nothing_to_undo")); return; }
+    if (!u) {
+      flashStatus(t("status.nothing_to_undo"));
+      return;
+    }
     redoStack.push(snapshotOf(u.mapId));
     applySnapshot(u);
   }
   function redo() {
     const r = redoStack.pop();
-    if (!r) { flashStatus(t("status.nothing_to_redo")); return; }
+    if (!r) {
+      flashStatus(t("status.nothing_to_redo"));
+      return;
+    }
     undoStack.push(snapshotOf(r.mapId));
     applySnapshot(r);
   }
@@ -1185,22 +1687,25 @@ const editorI18n = await createEditorI18n({
     return m.layers[ln][y * m.width + x];
   }
   function topLayerAt(x, y) {
-    const m = curMap(), i = y * m.width + x;
-    for (const ln of ["over", "decor2", "decor"]) if (m.layers[ln][i]) return ln;
+    const m = curMap(),
+      i = y * m.width + x;
+    for (const ln of ["over", "decor2", "decor"])
+      if (m.layers[ln][i]) return ln;
     return "ground";
   }
   // Auto layer for grid-free: terrain → ground, decor → decor (no decor2 stacking)
   function resolvePlacementLayer(t) {
     if (layer !== "auto") return layer;
     const def = Assets.tiles[t];
-    return (def && def.terrain) ? "ground" : "decor";
+    return def && def.terrain ? "ground" : "decor";
   }
   // Auto layer: terrain tiles go to ground; decorations stack onto decor, then decor 2.
   function resolvePaintLayer(t, x, y) {
     if (layer !== "auto") return layer;
     const def = Assets.tiles[t];
     if (!def || def.terrain) return "ground";
-    const m = curMap(), i = y * m.width + x;
+    const m = curMap(),
+      i = y * m.width + x;
     if (!m.layers.decor[i] || m.layers.decor[i] === t) return "decor";
     return "decor2";
   }
@@ -1221,25 +1726,40 @@ const editorI18n = await createEditorI18n({
   }
   function paintAt(cell) {
     if (tool === "pen") {
-      setCell(cell.x, cell.y, selectedTile, resolvePaintLayer(selectedTile, cell.x, cell.y));
+      setCell(
+        cell.x,
+        cell.y,
+        selectedTile,
+        resolvePaintLayer(selectedTile, cell.x, cell.y),
+      );
     } else if (tool === "erase") {
-      setCell(cell.x, cell.y, 0, layer === "auto" ? topLayerAt(cell.x, cell.y) : layer);
+      setCell(
+        cell.x,
+        cell.y,
+        0,
+        layer === "auto" ? topLayerAt(cell.x, cell.y) : layer,
+      );
     } else if (tool === "fill") {
       const def = Assets.tiles[selectedTile];
-      const ln = layer === "auto" ? (def && def.terrain ? "ground" : "decor") : layer;
+      const ln =
+        layer === "auto" ? (def && def.terrain ? "ground" : "decor") : layer;
       floodFill(cell.x, cell.y, selectedTile, ln);
     }
-    touch(); renderMap();
+    touch();
+    renderMap();
   }
   function paintShadow(cell, bit, add) {
-    const m = curMap(), i = cell.y * m.width + cell.x;
-    m.shadows[i] = add ? (m.shadows[i] | bit) : (m.shadows[i] & ~bit);
-    touch(); renderMap();
+    const m = curMap(),
+      i = cell.y * m.width + cell.x;
+    m.shadows[i] = add ? m.shadows[i] | bit : m.shadows[i] & ~bit;
+    touch();
+    renderMap();
   }
   function paintPass(cell, val) {
     const m = curMap();
     m.passOv[cell.y * m.width + cell.x] = val;
-    touch(); renderMap();
+    touch();
+    renderMap();
   }
   // HD-2D elevation layer (projects from before the heights layer existed may
   // lack the array until their next load runs the migration)
@@ -1251,10 +1771,12 @@ const editorI18n = await createEditorI18n({
   function paintHeight(cell, val) {
     const m = curMap();
     heightsOf(m)[cell.y * m.width + cell.x] = val;
-    touch(); renderMap();
+    touch();
+    renderMap();
   }
   function floodFillHeight(x, y, val) {
-    const m = curMap(), arr = heightsOf(m);
+    const m = curMap(),
+      arr = heightsOf(m);
     const target = arr[y * m.width + x] || 0;
     if (target === val) return;
     const stack = [[x, y]];
@@ -1270,11 +1792,18 @@ const editorI18n = await createEditorI18n({
 
   // ---- clipboard ----
   function canCopy() {
-    return mode === "map" ? !!selection : mode === "event" ? !!selectedEvent : false;
+    return mode === "map"
+      ? !!selection
+      : mode === "event"
+        ? !!selectedEvent
+        : false;
   }
   function copySelection(cut) {
     if (mode === "event") {
-      if (!selectedEvent) { flashStatus(t("status.select_event_first")); return; }
+      if (!selectedEvent) {
+        flashStatus(t("status.select_event_first"));
+        return;
+      }
       clipEvent = RA.clone(selectedEvent);
       clipTiles = null;
       if (cut) {
@@ -1282,15 +1811,24 @@ const editorI18n = await createEditorI18n({
         const m = curMap();
         m.events = m.events.filter((ev) => ev !== selectedEvent);
         selectedEvent = null;
-        touch(); renderMap();
+        touch();
+        renderMap();
       }
-      flashStatus((cut ? "Event cut" : "Event copied") + " — Paste (Ctrl+V), then click to place");
+      flashStatus(
+        (cut ? "Event cut" : "Event copied") +
+          " — Paste (Ctrl+V), then click to place",
+      );
       refreshToolbar();
       return;
     }
-    if (mode !== "map" || !selection) { flashStatus(t("status.select_area_first")); return; }
-    const m = curMap(), r = selection;
-    const w = r.x2 - r.x1 + 1, h2 = r.y2 - r.y1 + 1;
+    if (mode !== "map" || !selection) {
+      flashStatus(t("status.select_area_first"));
+      return;
+    }
+    const m = curMap(),
+      r = selection;
+    const w = r.x2 - r.x1 + 1,
+      h2 = r.y2 - r.y1 + 1;
     const clip = { w, h: h2, layers: {}, shadows: [], heights: [] };
     for (const ln of LAYER_ORDER) clip.layers[ln] = [];
     const hts = heightsOf(m);
@@ -1314,9 +1852,16 @@ const editorI18n = await createEditorI18n({
           heightsOf(m)[i] = 0;
         }
       }
-      touch(); renderMap();
+      touch();
+      renderMap();
     }
-    flashStatus((cut ? "Cut " : "Copied ") + w + "×" + h2 + " tiles — Paste (Ctrl+V), then click to stamp");
+    flashStatus(
+      (cut ? "Cut " : "Copied ") +
+        w +
+        "×" +
+        h2 +
+        " tiles — Paste (Ctrl+V), then click to stamp",
+    );
     refreshToolbar();
   }
   function startPaste() {
@@ -1331,7 +1876,8 @@ const editorI18n = await createEditorI18n({
       return;
     }
     flashStatus(t("status.paste_cancel_instruction"));
-    refreshToolbar(); renderMap();
+    refreshToolbar();
+    renderMap();
   }
   function stampPaste(cell) {
     if (pasteMode === "tiles" && clipTiles) {
@@ -1339,39 +1885,56 @@ const editorI18n = await createEditorI18n({
       const m = curMap();
       for (let dy = 0; dy < clipTiles.h; dy++) {
         for (let dx = 0; dx < clipTiles.w; dx++) {
-          const x = cell.x + dx, y = cell.y + dy;
+          const x = cell.x + dx,
+            y = cell.y + dy;
           if (x >= m.width || y >= m.height) continue;
-          const si = dy * clipTiles.w + dx, di = y * m.width + x;
-          for (const ln of LAYER_ORDER) m.layers[ln][di] = clipTiles.layers[ln][si];
+          const si = dy * clipTiles.w + dx,
+            di = y * m.width + x;
+          for (const ln of LAYER_ORDER)
+            m.layers[ln][di] = clipTiles.layers[ln][si];
           m.shadows[di] = clipTiles.shadows[si];
           heightsOf(m)[di] = (clipTiles.heights && clipTiles.heights[si]) || 0;
         }
       }
-      touch(); renderMap();
+      touch();
+      renderMap();
     } else if (pasteMode === "event" && clipEvent) {
-      if (eventAt(cell.x, cell.y)) { flashStatus(t("status.cell_has_event")); return; }
+      if (eventAt(cell.x, cell.y)) {
+        flashStatus(t("status.cell_has_event"));
+        return;
+      }
       pushUndo();
       const m = curMap();
       const ev = RA.clone(clipEvent);
       ev.id = RA.nextId(m.events);
-      ev.x = cell.x; ev.y = cell.y;
+      ev.x = cell.x;
+      ev.y = cell.y;
       m.events.push(ev);
       selectedEvent = ev;
       pasteMode = null; // events place one at a time
-      touch(); renderMap(); refreshToolbar(); setStatus();
+      touch();
+      renderMap();
+      refreshToolbar();
+      setStatus();
     }
   }
   function cancelPaste() {
     pasteMode = null;
-    renderMap(); refreshToolbar(); setStatus();
+    renderMap();
+    refreshToolbar();
+    setStatus();
   }
   function clearSelection() {
     selection = null;
     pasteMode = null;
-    renderMap(); refreshToolbar(); setStatus();
+    renderMap();
+    refreshToolbar();
+    setStatus();
   }
 
-  function eventAt(x, y) { return curMap().events.find((e) => e.x === x && e.y === y) || null; }
+  function eventAt(x, y) {
+    return curMap().events.find((e) => e.x === x && e.y === y) || null;
+  }
 
   function onCanvasDown(e) {
     const cell = cellFromMouse(e);
@@ -1382,29 +1945,40 @@ const editorI18n = await createEditorI18n({
       return;
     }
     if (e.button === 2) {
-      if (mode === "map" && tool === "shadow") { // right button erases shadows
-        painting = true; shadowSet = false;
+      if (mode === "map" && tool === "shadow") {
+        // right button erases shadows
+        painting = true;
+        shadowSet = false;
         pushUndo();
         paintShadow(cell, quadFromMouse(e), false);
         return;
       }
-      if (mode === "height") { // eyedropper: pick up the elevation under the cursor
+      if (mode === "height") {
+        // eyedropper: pick up the elevation under the cursor
         heightVal = heightsOf(curMap())[cell.y * curMap().width + cell.x] || 0;
         setStatus();
         return;
       }
-      if (mode === "map") { // eyedropper from the topmost visible tile
+      if (mode === "map") {
+        // eyedropper from the topmost visible tile
         const ln = layer === "auto" ? topLayerAt(cell.x, cell.y) : layer;
-        const t = getCell(cell.x, cell.y, ln) || getCell(cell.x, cell.y, "ground");
-        if (t > 0) { selectedTile = t; renderPalette(); setStatus(); }
+        const t =
+          getCell(cell.x, cell.y, ln) || getCell(cell.x, cell.y, "ground");
+        if (t > 0) {
+          selectedTile = t;
+          renderPalette();
+          setStatus();
+        }
       }
       return;
     }
     if (e.button !== 0) return;
     if (mode === "start") {
       proj.system.startMapId = curMapId;
-      proj.system.startX = cell.x; proj.system.startY = cell.y;
-      touch(); renderMap();
+      proj.system.startX = cell.x;
+      proj.system.startY = cell.y;
+      touch();
+      renderMap();
       flashStatus(t("status.start_pos_set"));
       setMode("event");
       return;
@@ -1421,9 +1995,14 @@ const editorI18n = await createEditorI18n({
     if (mode === "height") {
       pushUndo();
       painting = true;
-      if (tool === "rect" || tool === "circle") { rectStart = cell; renderMap(); }
-      else if (tool === "fill") { floodFillHeight(cell.x, cell.y, heightVal); touch(); renderMap(); }
-      else paintHeight(cell, tool === "erase" ? 0 : heightVal);
+      if (tool === "rect" || tool === "circle") {
+        rectStart = cell;
+        renderMap();
+      } else if (tool === "fill") {
+        floodFillHeight(cell.x, cell.y, heightVal);
+        touch();
+        renderMap();
+      } else paintHeight(cell, tool === "erase" ? 0 : heightVal);
       return;
     }
     if (mode === "flags") {
@@ -1435,18 +2014,73 @@ const editorI18n = await createEditorI18n({
         case "passage": {
           const cur = flagsOfPlacement(cell2, curMap());
           const pass = cur & tf.TF_PASS_MASK;
-          const next = pass === tf.TF_PASS_O ? tf.TF_PASS_X : pass === tf.TF_PASS_X ? tf.TF_PASS_STAR : tf.TF_PASS_O;
+          const next =
+            pass === tf.TF_PASS_O
+              ? tf.TF_PASS_X
+              : pass === tf.TF_PASS_X
+                ? tf.TF_PASS_STAR
+                : tf.TF_PASS_O;
           paintFlags(cell2, tf.TF_PASS_MASK, next);
           break;
         }
-        case "dir-n": paintFlags(cell2, tf.TF_DIR_N, (flagsOfPlacement(cell2, curMap()) & tf.TF_DIR_N) ? 0 : tf.TF_DIR_N); break;
-        case "dir-s": paintFlags(cell2, tf.TF_DIR_S, (flagsOfPlacement(cell2, curMap()) & tf.TF_DIR_S) ? 0 : tf.TF_DIR_S); break;
-        case "dir-e": paintFlags(cell2, tf.TF_DIR_E, (flagsOfPlacement(cell2, curMap()) & tf.TF_DIR_E) ? 0 : tf.TF_DIR_E); break;
-        case "dir-w": paintFlags(cell2, tf.TF_DIR_W, (flagsOfPlacement(cell2, curMap()) & tf.TF_DIR_W) ? 0 : tf.TF_DIR_W); break;
-        case "ladder":  paintFlags(cell2, tf.TF_LADDER,  (flagsOfPlacement(cell2, curMap()) & tf.TF_LADDER)  ? 0 : tf.TF_LADDER); break;
-        case "bush":    paintFlags(cell2, tf.TF_BUSH,    (flagsOfPlacement(cell2, curMap()) & tf.TF_BUSH)    ? 0 : tf.TF_BUSH); break;
-        case "counter": paintFlags(cell2, tf.TF_COUNTER, (flagsOfPlacement(cell2, curMap()) & tf.TF_COUNTER) ? 0 : tf.TF_COUNTER); break;
-        case "damage":  paintFlags(cell2, tf.TF_DAMAGE,  (flagsOfPlacement(cell2, curMap()) & tf.TF_DAMAGE)  ? 0 : tf.TF_DAMAGE); break;
+        case "dir-n":
+          paintFlags(
+            cell2,
+            tf.TF_DIR_N,
+            flagsOfPlacement(cell2, curMap()) & tf.TF_DIR_N ? 0 : tf.TF_DIR_N,
+          );
+          break;
+        case "dir-s":
+          paintFlags(
+            cell2,
+            tf.TF_DIR_S,
+            flagsOfPlacement(cell2, curMap()) & tf.TF_DIR_S ? 0 : tf.TF_DIR_S,
+          );
+          break;
+        case "dir-e":
+          paintFlags(
+            cell2,
+            tf.TF_DIR_E,
+            flagsOfPlacement(cell2, curMap()) & tf.TF_DIR_E ? 0 : tf.TF_DIR_E,
+          );
+          break;
+        case "dir-w":
+          paintFlags(
+            cell2,
+            tf.TF_DIR_W,
+            flagsOfPlacement(cell2, curMap()) & tf.TF_DIR_W ? 0 : tf.TF_DIR_W,
+          );
+          break;
+        case "ladder":
+          paintFlags(
+            cell2,
+            tf.TF_LADDER,
+            flagsOfPlacement(cell2, curMap()) & tf.TF_LADDER ? 0 : tf.TF_LADDER,
+          );
+          break;
+        case "bush":
+          paintFlags(
+            cell2,
+            tf.TF_BUSH,
+            flagsOfPlacement(cell2, curMap()) & tf.TF_BUSH ? 0 : tf.TF_BUSH,
+          );
+          break;
+        case "counter":
+          paintFlags(
+            cell2,
+            tf.TF_COUNTER,
+            flagsOfPlacement(cell2, curMap()) & tf.TF_COUNTER
+              ? 0
+              : tf.TF_COUNTER,
+          );
+          break;
+        case "damage":
+          paintFlags(
+            cell2,
+            tf.TF_DAMAGE,
+            flagsOfPlacement(cell2, curMap()) & tf.TF_DAMAGE ? 0 : tf.TF_DAMAGE,
+          );
+          break;
         case "terrain": {
           const cur2 = flagsOfPlacement(cell2, curMap());
           const tag = (cur2 & tf.TF_TERRAIN_MASK) >> tf.TF_TERRAIN_SHIFT;
@@ -1459,21 +2093,38 @@ const editorI18n = await createEditorI18n({
     }
     if (mode === "collision") {
       const m2 = curMap();
-      if (!m2.collision) m2.collision = { tiles: new Array(m2.width * m2.height).fill(null), masks: [] };
+      if (!m2.collision)
+        m2.collision = {
+          tiles: new Array(m2.width * m2.height).fill(null),
+          masks: [],
+        };
       const px = pixelFromMouse(e);
       // check free-form mask handles first
       if (selectedMask && selectedMask.mask) {
         const mk = selectedMask.mask;
-        const rx = mk.x, ry = mk.y, rw = mk.w, rh = mk.h;
+        const rx = mk.x,
+          ry = mk.y,
+          rw = mk.w,
+          rh = mk.h;
         const hs = Math.max(10, TILE * 0.12);
         const half = hs / 2;
         const handles = [
-          [rx, ry, "nw"], [rx + rw / 2, ry, "n"], [rx + rw, ry, "ne"],
-          [rx + rw, ry + rh / 2, "e"], [rx + rw, ry + rh, "se"],
-          [rx + rw / 2, ry + rh, "s"], [rx, ry + rh, "sw"], [rx, ry + rh / 2, "w"],
+          [rx, ry, "nw"],
+          [rx + rw / 2, ry, "n"],
+          [rx + rw, ry, "ne"],
+          [rx + rw, ry + rh / 2, "e"],
+          [rx + rw, ry + rh, "se"],
+          [rx + rw / 2, ry + rh, "s"],
+          [rx, ry + rh, "sw"],
+          [rx, ry + rh / 2, "w"],
         ];
         for (const h of handles) {
-          if (px.x >= h[0] - half && px.x <= h[0] + half && px.y >= h[1] - half && px.y <= h[1] + half) {
+          if (
+            px.x >= h[0] - half &&
+            px.x <= h[0] + half &&
+            px.y >= h[1] - half &&
+            px.y <= h[1] + half
+          ) {
             maskDragHandle = h[2];
             maskDragging = true;
             maskDragOffset = { dx: px.x - rx, dy: px.y - ry };
@@ -1494,13 +2145,19 @@ const editorI18n = await createEditorI18n({
       for (let mi = 0; mi < (m2.collision.masks || []).length; mi++) {
         const mk = m2.collision.masks[mi];
         if (!mk) continue;
-        if (px.x >= mk.x && px.x <= mk.x + mk.w && px.y >= mk.y && px.y <= mk.y + mk.h) {
+        if (
+          px.x >= mk.x &&
+          px.x <= mk.x + mk.w &&
+          px.y >= mk.y &&
+          px.y <= mk.y + mk.h
+        ) {
           selectedMask = { mask: mk, index: mi };
           maskDragHandle = "move";
           maskDragging = true;
           maskDragOffset = { dx: px.x - mk.x, dy: px.y - mk.y };
           maskDragMoved = false;
-          renderMap(); refreshToolbar();
+          renderMap();
+          refreshToolbar();
           return;
         }
       }
@@ -1508,7 +2165,13 @@ const editorI18n = await createEditorI18n({
       selectedMask = null;
       maskDragging = false;
       pushUndo();
-      const newMask = { id: ++_maskIdCounter, x: px.x - 24, y: px.y - 24, w: 48, h: 48 };
+      const newMask = {
+        id: ++_maskIdCounter,
+        x: px.x - 24,
+        y: px.y - 24,
+        w: 48,
+        h: 48,
+      };
       if (!m2.collision.masks) m2.collision.masks = [];
       m2.collision.masks.push(newMask);
       selectedMask = { mask: newMask, index: m2.collision.masks.length - 1 };
@@ -1516,14 +2179,17 @@ const editorI18n = await createEditorI18n({
       maskDragging = true;
       maskDragOffset = { dx: 24, dy: 24 };
       maskDragMoved = false;
-      touch(); renderMap(); refreshToolbar();
+      touch();
+      renderMap();
+      refreshToolbar();
       return;
     }
     if (mode === "event") {
       selectedEvent = eventAt(cell.x, cell.y);
       dragEvent = selectedEvent;
       dragPushed = false;
-      renderMap(); refreshToolbar();
+      renderMap();
+      refreshToolbar();
       return;
     }
     // map mode
@@ -1548,9 +2214,13 @@ const editorI18n = await createEditorI18n({
         dragPlacement = true;
         dragPlacementObj = hit.placement;
         dragPlacementLayer = hit.layer;
-        dragPlacementOffset = { dx: px.x - hit.placement.x, dy: px.y - hit.placement.y };
+        dragPlacementOffset = {
+          dx: px.x - hit.placement.x,
+          dy: px.y - hit.placement.y,
+        };
         dragPlacementPushed = false;
-        renderMap(); refreshToolbar();
+        renderMap();
+        refreshToolbar();
         updatePropsPanel(hit.placement, hit.layer);
         return;
       }
@@ -1561,41 +2231,64 @@ const editorI18n = await createEditorI18n({
       const sx = snapPx(px.x - TILE / 2);
       const sy = snapPx(px.y - TILE / 2);
       const np = {
-        id: crypto.randomUUID ? crypto.randomUUID() : "p_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
+        id: crypto.randomUUID
+          ? crypto.randomUUID()
+          : "p_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
         tileId: selectedTile,
         x: sx,
         y: sy,
       };
       if (!m.tilePlacements[ln]) m.tilePlacements[ln] = [];
       m.tilePlacements[ln].push(np);
-      touch(); renderMap(); refreshToolbar();
+      touch();
+      renderMap();
+      refreshToolbar();
       return;
     }
     // legacy map mode
-    if (e.shiftKey) { // marquee selection
+    if (e.shiftKey) {
+      // marquee selection
       selecting = true;
       selAnchor = cell;
       selection = normRect(cell, cell);
-      renderMap(); refreshToolbar();
+      renderMap();
+      refreshToolbar();
       return;
     }
     painting = true;
     pushUndo();
-    if (tool === "rect" || tool === "circle") { rectStart = cell; renderMap(); }
-    else if (tool === "shadow") { shadowSet = true; paintShadow(cell, quadFromMouse(e), true); }
-    else paintAt(cell);
+    if (tool === "rect" || tool === "circle") {
+      rectStart = cell;
+      renderMap();
+    } else if (tool === "shadow") {
+      shadowSet = true;
+      paintShadow(cell, quadFromMouse(e), true);
+    } else paintAt(cell);
   }
   function onCanvasMove(e) {
     const cell = cellFromMouse(e);
-    const q = cell && tool === "shadow" && mode === "map" ? quadFromMouse(e) : 0;
-    const changed = !cell || !hoverCell || cell.x !== hoverCell.x || cell.y !== hoverCell.y || q !== hoverQuad;
-    hoverCell = cell; hoverQuad = q;
+    const q =
+      cell && tool === "shadow" && mode === "map" ? quadFromMouse(e) : 0;
+    const changed =
+      !cell ||
+      !hoverCell ||
+      cell.x !== hoverCell.x ||
+      cell.y !== hoverCell.y ||
+      q !== hoverQuad;
+    hoverCell = cell;
+    hoverQuad = q;
     // collision mask drag/resize (check before cell bounds so masks can be dragged outside the grid)
     if (mode === "collision" && maskDragging && selectedMask) {
       const m2 = curMap();
-      if (!m2.collision || !m2.collision.masks) { if (!cell && changed) renderMap(); return; }
+      if (!m2.collision || !m2.collision.masks) {
+        if (!cell && changed) renderMap();
+        return;
+      }
       const mk = m2.collision.masks[selectedMask.index];
-      if (!mk) { if (!cell && changed) renderMap(); return; }
+      if (!mk) {
+        if (!cell && changed) renderMap();
+        return;
+      }
       const px = pixelFromMouse(e);
       maskDragMoved = true;
       if (maskDragHandle === "move") {
@@ -1605,18 +2298,50 @@ const editorI18n = await createEditorI18n({
         const minS = 4;
         const r = { x: mk.x, y: mk.y, w: mk.w, h: mk.h };
         switch (maskDragHandle) {
-          case "nw": r.w += r.x - px.x; r.x = px.x; r.h += r.y - px.y; r.y = px.y; break;
-          case "n": r.h += r.y - px.y; r.y = px.y; break;
-          case "ne": r.w = px.x - r.x; r.h += r.y - px.y; r.y = px.y; break;
-          case "e": r.w = px.x - r.x; break;
-          case "se": r.w = px.x - r.x; r.h = px.y - r.y; break;
-          case "s": r.h = px.y - r.y; break;
-          case "sw": r.w += r.x - px.x; r.x = px.x; r.h = px.y - r.y; break;
-          case "w": r.w += r.x - px.x; r.x = px.x; break;
+          case "nw":
+            r.w += r.x - px.x;
+            r.x = px.x;
+            r.h += r.y - px.y;
+            r.y = px.y;
+            break;
+          case "n":
+            r.h += r.y - px.y;
+            r.y = px.y;
+            break;
+          case "ne":
+            r.w = px.x - r.x;
+            r.h += r.y - px.y;
+            r.y = px.y;
+            break;
+          case "e":
+            r.w = px.x - r.x;
+            break;
+          case "se":
+            r.w = px.x - r.x;
+            r.h = px.y - r.y;
+            break;
+          case "s":
+            r.h = px.y - r.y;
+            break;
+          case "sw":
+            r.w += r.x - px.x;
+            r.x = px.x;
+            r.h = px.y - r.y;
+            break;
+          case "w":
+            r.w += r.x - px.x;
+            r.x = px.x;
+            break;
         }
-        if (r.w >= minS && r.h >= minS) { mk.x = r.x; mk.y = r.y; mk.w = r.w; mk.h = r.h; }
+        if (r.w >= minS && r.h >= minS) {
+          mk.x = r.x;
+          mk.y = r.y;
+          mk.w = r.w;
+          mk.h = r.h;
+        }
       }
-      touch(); renderMap();
+      touch();
+      renderMap();
       return;
     }
     // grid-free placement drag
@@ -1628,7 +2353,7 @@ const editorI18n = await createEditorI18n({
         // refresh ref after undo snapshot cloned the placement
         const m2 = curMap();
         const arr2 = m2.tilePlacements[dragPlacementLayer] || [];
-        const updated = arr2.find(p => p.id === dragPlacementObj.id);
+        const updated = arr2.find((p) => p.id === dragPlacementObj.id);
         if (updated) dragPlacementObj = updated;
       }
       if (dragPlacementObj) {
@@ -1636,15 +2361,23 @@ const editorI18n = await createEditorI18n({
         dragPlacementObj.y = snapPx(px.y - dragPlacementOffset.dy);
         if (selectedPlacement) selectedPlacement.placement = dragPlacementObj;
         updatePropsPanel(dragPlacementObj, dragPlacementLayer);
-        touch(); renderMap();
+        touch();
+        renderMap();
       }
       return;
     }
-    if (!cell) { if (changed) renderMap(); return; }
+    if (!cell) {
+      if (changed) renderMap();
+      return;
+    }
     if (selecting) {
       selection = normRect(selAnchor, cell);
       renderMap();
-    } else if (mode === "map" && painting && (tool === "pen" || tool === "erase")) {
+    } else if (
+      mode === "map" &&
+      painting &&
+      (tool === "pen" || tool === "erase")
+    ) {
       paintAt(cell);
     } else if (mode === "map" && painting && tool === "shadow") {
       paintShadow(cell, q, shadowSet);
@@ -1653,26 +2386,81 @@ const editorI18n = await createEditorI18n({
     } else if (mode === "flags" && painting) {
       const tf = Assets;
       const cur = flagsOfPlacement(cell, curMap());
-      let mask = tf.TF_PASS_MASK, val = 0;
+      let mask = tf.TF_PASS_MASK,
+        val = 0;
       switch (flagsTool) {
-        case "passage": { const pass = cur & tf.TF_PASS_MASK; val = pass === tf.TF_PASS_O ? tf.TF_PASS_X : pass === tf.TF_PASS_X ? tf.TF_PASS_STAR : tf.TF_PASS_O; break; }
-        case "dir-n": mask = tf.TF_DIR_N; val = (cur & tf.TF_DIR_N) ? 0 : tf.TF_DIR_N; break;
-        case "dir-s": mask = tf.TF_DIR_S; val = (cur & tf.TF_DIR_S) ? 0 : tf.TF_DIR_S; break;
-        case "dir-e": mask = tf.TF_DIR_E; val = (cur & tf.TF_DIR_E) ? 0 : tf.TF_DIR_E; break;
-        case "dir-w": mask = tf.TF_DIR_W; val = (cur & tf.TF_DIR_W) ? 0 : tf.TF_DIR_W; break;
-        case "ladder":  mask = tf.TF_LADDER;  val = (cur & tf.TF_LADDER)  ? 0 : tf.TF_LADDER; break;
-        case "bush":    mask = tf.TF_BUSH;    val = (cur & tf.TF_BUSH)    ? 0 : tf.TF_BUSH; break;
-        case "counter": mask = tf.TF_COUNTER; val = (cur & tf.TF_COUNTER) ? 0 : tf.TF_COUNTER; break;
-        case "damage":  mask = tf.TF_DAMAGE;  val = (cur & tf.TF_DAMAGE)  ? 0 : tf.TF_DAMAGE; break;
-        case "terrain": { mask = tf.TF_TERRAIN_MASK; const tag = (cur >> tf.TF_TERRAIN_SHIFT) & 7; val = ((tag + 1) & 7) << tf.TF_TERRAIN_SHIFT; break; }
+        case "passage": {
+          const pass = cur & tf.TF_PASS_MASK;
+          val =
+            pass === tf.TF_PASS_O
+              ? tf.TF_PASS_X
+              : pass === tf.TF_PASS_X
+                ? tf.TF_PASS_STAR
+                : tf.TF_PASS_O;
+          break;
+        }
+        case "dir-n":
+          mask = tf.TF_DIR_N;
+          val = cur & tf.TF_DIR_N ? 0 : tf.TF_DIR_N;
+          break;
+        case "dir-s":
+          mask = tf.TF_DIR_S;
+          val = cur & tf.TF_DIR_S ? 0 : tf.TF_DIR_S;
+          break;
+        case "dir-e":
+          mask = tf.TF_DIR_E;
+          val = cur & tf.TF_DIR_E ? 0 : tf.TF_DIR_E;
+          break;
+        case "dir-w":
+          mask = tf.TF_DIR_W;
+          val = cur & tf.TF_DIR_W ? 0 : tf.TF_DIR_W;
+          break;
+        case "ladder":
+          mask = tf.TF_LADDER;
+          val = cur & tf.TF_LADDER ? 0 : tf.TF_LADDER;
+          break;
+        case "bush":
+          mask = tf.TF_BUSH;
+          val = cur & tf.TF_BUSH ? 0 : tf.TF_BUSH;
+          break;
+        case "counter":
+          mask = tf.TF_COUNTER;
+          val = cur & tf.TF_COUNTER ? 0 : tf.TF_COUNTER;
+          break;
+        case "damage":
+          mask = tf.TF_DAMAGE;
+          val = cur & tf.TF_DAMAGE ? 0 : tf.TF_DAMAGE;
+          break;
+        case "terrain": {
+          mask = tf.TF_TERRAIN_MASK;
+          const tag = (cur >> tf.TF_TERRAIN_SHIFT) & 7;
+          val = ((tag + 1) & 7) << tf.TF_TERRAIN_SHIFT;
+          break;
+        }
       }
       paintFlags(cell, mask, val);
-    } else if (mode === "height" && painting && tool !== "rect" && tool !== "circle" && tool !== "fill") {
+    } else if (
+      mode === "height" &&
+      painting &&
+      tool !== "rect" &&
+      tool !== "circle" &&
+      tool !== "fill"
+    ) {
       paintHeight(cell, tool === "erase" ? 0 : heightVal);
-    } else if (mode === "event" && dragEvent && (dragEvent.x !== cell.x || dragEvent.y !== cell.y)) {
+    } else if (
+      mode === "event" &&
+      dragEvent &&
+      (dragEvent.x !== cell.x || dragEvent.y !== cell.y)
+    ) {
       if (!eventAt(cell.x, cell.y)) {
-        if (!dragPushed) { dragPushed = true; pushUndo(); dragEvent = curMap().events.find((ev) => ev.id === dragEvent.id); selectedEvent = dragEvent; }
-        dragEvent.x = cell.x; dragEvent.y = cell.y;
+        if (!dragPushed) {
+          dragPushed = true;
+          pushUndo();
+          dragEvent = curMap().events.find((ev) => ev.id === dragEvent.id);
+          selectedEvent = dragEvent;
+        }
+        dragEvent.x = cell.x;
+        dragEvent.y = cell.y;
         touch();
       }
       renderMap();
@@ -1688,7 +2476,8 @@ const editorI18n = await createEditorI18n({
       dragPlacementLayer = null;
       dragPlacementOffset = null;
       dragPlacementPushed = false;
-      renderMap(); refreshToolbar();
+      renderMap();
+      refreshToolbar();
       return;
     }
     if (mode === "collision") {
@@ -1699,31 +2488,49 @@ const editorI18n = await createEditorI18n({
       maskDragHandle = null;
       maskDragOffset = null;
       maskDragMoved = false;
-      if (selectedMask) { renderMap(); refreshToolbar(); }
+      if (selectedMask) {
+        renderMap();
+        refreshToolbar();
+      }
       return;
     }
     if (selecting) {
-      selecting = false; selAnchor = null;
-      refreshToolbar(); renderMap();
+      selecting = false;
+      selAnchor = null;
+      refreshToolbar();
+      renderMap();
     }
-    if ((mode === "map" || mode === "height") && painting && (tool === "rect" || tool === "circle") && rectStart && hoverCell) {
+    if (
+      (mode === "map" || mode === "height") &&
+      painting &&
+      (tool === "rect" || tool === "circle") &&
+      rectStart &&
+      hoverCell
+    ) {
       const m = curMap();
       const r = normRect(rectStart, hoverCell);
-      const cx = (r.x1 + r.x2 + 1) / 2, cy = (r.y1 + r.y2 + 1) / 2;
-      const rx = (r.x2 - r.x1 + 1) / 2, ry = (r.y2 - r.y1 + 1) / 2;
+      const cx = (r.x1 + r.x2 + 1) / 2,
+        cy = (r.y1 + r.y2 + 1) / 2;
+      const rx = (r.x2 - r.x1 + 1) / 2,
+        ry = (r.y2 - r.y1 + 1) / 2;
       for (let y = r.y1; y <= r.y2; y++) {
         for (let x = r.x1; x <= r.x2; x++) {
           if (tool === "circle") {
-            const nx = (x + 0.5 - cx) / rx, ny = (y + 0.5 - cy) / ry;
+            const nx = (x + 0.5 - cx) / rx,
+              ny = (y + 0.5 - cy) / ry;
             if (nx * nx + ny * ny > 1) continue;
           }
           if (mode === "height") heightsOf(m)[y * m.width + x] = heightVal;
-          else setCell(x, y, selectedTile, resolvePaintLayer(selectedTile, x, y));
+          else
+            setCell(x, y, selectedTile, resolvePaintLayer(selectedTile, x, y));
         }
       }
       touch();
     }
-    painting = false; rectStart = null; dragEvent = null; dragPushed = false;
+    painting = false;
+    rectStart = null;
+    dragEvent = null;
+    dragPushed = false;
     renderMap();
   }
   function onCanvasDbl(e) {
@@ -1738,22 +2545,30 @@ const editorI18n = await createEditorI18n({
       touch();
     }
     selectedEvent = ev;
-    renderMap(); refreshToolbar();
+    renderMap();
+    refreshToolbar();
     openEventEditor(ev);
   }
 
   function setStatus() {
     const m = curMap();
     let s = m ? m.name + " (" + m.width + "×" + m.height + ")" : "";
-    s += "  ·  " + (mode === "map" ? t(TOOL_LABELS[tool]) + " / " + t(LAYER_LABELS[layer])
-      : mode === "event" ? t("mode.desc.event")
-      : mode === "pass" ? t("mode.desc.passability")
-      : mode === "height" ? t("mode.desc.height", {
-        value: heightVal,
-        tool: t(TOOL_LABELS[tool]),
-      })
-      : mode === "collision" ? t("mode.desc.collision")
-      : t("mode.desc.start"));
+    s +=
+      "  ·  " +
+      (mode === "map"
+        ? t(TOOL_LABELS[tool]) + " / " + t(LAYER_LABELS[layer])
+        : mode === "event"
+          ? t("mode.desc.event")
+          : mode === "pass"
+            ? t("mode.desc.passability")
+            : mode === "height"
+              ? t("mode.desc.height", {
+                  value: heightVal,
+                  tool: t(TOOL_LABELS[tool]),
+                })
+              : mode === "collision"
+                ? t("mode.desc.collision")
+                : t("mode.desc.start"));
     if (hoverCell && m) {
       s += "  ·  " + hoverCell.x + "," + hoverCell.y;
       if (mode === "map" && m.gridFree && m.tilePlacements) {
@@ -1764,27 +2579,50 @@ const editorI18n = await createEditorI18n({
         if (hit) {
           const t = Assets.tiles[hit.placement.tileId];
           s += "  ·  " + hit.layer + ": " + (t ? t.name : "?");
-          if (selectedPlacement && selectedPlacement.placement && selectedPlacement.placement.id === hit.placement.id) {
+          if (
+            selectedPlacement &&
+            selectedPlacement.placement &&
+            selectedPlacement.placement.id === hit.placement.id
+          ) {
             s += " [selected]";
           }
         } else {
           s += "  ·  snap: " + snapMode;
         }
       } else if (mode === "map") {
-        const ln = layer === "auto" ? topLayerAt(hoverCell.x, hoverCell.y) : layer;
+        const ln =
+          layer === "auto" ? topLayerAt(hoverCell.x, hoverCell.y) : layer;
         const t = getCell(hoverCell.x, hoverCell.y, ln);
-        s += "  ·  " + ln + ": " + (Assets.tiles[t] ? Assets.tiles[t].name : "?");
+        s +=
+          "  ·  " + ln + ": " + (Assets.tiles[t] ? Assets.tiles[t].name : "?");
       }
       if (mode === "pass") {
-        s += "  ·  " + (effectivePass(hoverCell.x, hoverCell.y) ? "○ " + t("status.passable") : "✕ " + t("status.blocked")) +
-          (m.passOv[hoverCell.y * m.width + hoverCell.x] ? " (" + t("status.override") + ")" : "");
+        s +=
+          "  ·  " +
+          (effectivePass(hoverCell.x, hoverCell.y)
+            ? "○ " + t("status.passable")
+            : "✕ " + t("status.blocked")) +
+          (m.passOv[hoverCell.y * m.width + hoverCell.x]
+            ? " (" + t("status.override") + ")"
+            : "");
       }
       const ev = mode !== "map" && eventAt(hoverCell.x, hoverCell.y);
       if (ev) s += "  ·  " + ev.name;
     }
-    if (mode === "map" && selection) s += "  ·  " + t("status.selection") + " " + (selection.x2 - selection.x1 + 1) + "×" + (selection.y2 - selection.y1 + 1);
+    if (mode === "map" && selection)
+      s +=
+        "  ·  " +
+        t("status.selection") +
+        " " +
+        (selection.x2 - selection.x1 + 1) +
+        "×" +
+        (selection.y2 - selection.y1 + 1);
     if (mode === "map") {
-      s += "  ·  " + t("status.brush") + ": " + (Assets.tiles[selectedTile] ? Assets.tiles[selectedTile].name : "?");
+      s +=
+        "  ·  " +
+        t("status.brush") +
+        ": " +
+        (Assets.tiles[selectedTile] ? Assets.tiles[selectedTile].name : "?");
       if (m && m.gridFree) s += "  ·  snap: " + snapMode;
     }
     $("status-text").textContent = s;
@@ -1816,11 +2654,23 @@ const editorI18n = await createEditorI18n({
     const ul = $("maplist");
     ul.innerHTML = "";
     for (const m of proj.maps) {
-      const li = h("li", {
-        class: m.id === curMapId ? "sel" : "",
-        onclick() { curMapId = m.id; selectedEvent = null; rebuildMapList(); renderMap(); setStatus(); },
-        ondblclick() { openMapProps(); },
-      }, m.id + ": " + m.name);
+      const li = h(
+        "li",
+        {
+          class: m.id === curMapId ? "sel" : "",
+          onclick() {
+            curMapId = m.id;
+            selectedEvent = null;
+            rebuildMapList();
+            renderMap();
+            setStatus();
+          },
+          ondblclick() {
+            openMapProps();
+          },
+        },
+        m.id + ": " + m.name,
+      );
       ul.appendChild(li);
     }
   }
@@ -1829,16 +2679,23 @@ const editorI18n = await createEditorI18n({
     const m = DataDefaults.newMap(id, "Map " + id, 20, 15, Assets.T.grass);
     proj.maps.push(m);
     curMapId = id;
-    rebuildMapList(); renderMap(); touch();
+    rebuildMapList();
+    renderMap();
+    touch();
     openMapProps();
   }
   function deleteMap() {
-    if (proj.maps.length <= 1) { alert(t("status.need_one_map")); return; }
+    if (proj.maps.length <= 1) {
+      alert(t("status.need_one_map"));
+      return;
+    }
     const m = curMap();
     confirmBox(t("status.confirm_delete_map", { name: m.name }), () => {
       proj.maps = proj.maps.filter((x) => x.id !== m.id);
       curMapId = proj.maps[0].id;
-      rebuildMapList(); renderMap(); touch();
+      rebuildMapList();
+      renderMap();
+      touch();
     });
   }
 
@@ -1850,63 +2707,80 @@ const editorI18n = await createEditorI18n({
       theme: "grassland",
       style: "wilderness",
       density: "medium",
-      setStart: true
+      setStart: true,
     };
 
-    const content = h("div", null,
+    const content = h(
+      "div",
+      null,
       field("Name", tIn(work, "name")),
       row(
         field("Width", nIn(work, "width", 8, 100)),
-        field("Height", nIn(work, "height", 8, 100))
+        field("Height", nIn(work, "height", 8, 100)),
       ),
-      field("Theme", sel(work, "theme", [
-        { v: "grassland", l: "Grassland / Forest" },
-        { v: "desert", l: "Desert / Oasis" },
-        { v: "cave", l: "Cave / Lava" },
-        { v: "snow", l: "Snow / Ice" },
-        { v: "swamp", l: "Swamp / Marsh" }
-      ])),
-      field("Generator Style", sel(work, "style", [
-        { v: "wilderness", l: "Wilderness (Open)" },
-        { v: "cellular", l: "Cave (Cellular Automata)" },
-        { v: "maze", l: "Maze / Labyrinth" },
-        { v: "islands", l: "Islands" }
-      ])),
-      field("Object Density", sel(work, "density", [
-        { v: "sparse", l: "Sparse" },
-        { v: "medium", l: "Medium" },
-        { v: "dense", l: "Dense" }
-      ])),
-      h("label", { class: "fld" },
+      field(
+        "Theme",
+        sel(work, "theme", [
+          { v: "grassland", l: "Grassland / Forest" },
+          { v: "desert", l: "Desert / Oasis" },
+          { v: "cave", l: "Cave / Lava" },
+          { v: "snow", l: "Snow / Ice" },
+          { v: "swamp", l: "Swamp / Marsh" },
+        ]),
+      ),
+      field(
+        "Generator Style",
+        sel(work, "style", [
+          { v: "wilderness", l: "Wilderness (Open)" },
+          { v: "cellular", l: "Cave (Cellular Automata)" },
+          { v: "maze", l: "Maze / Labyrinth" },
+          { v: "islands", l: "Islands" },
+        ]),
+      ),
+      field(
+        "Object Density",
+        sel(work, "density", [
+          { v: "sparse", l: "Sparse" },
+          { v: "medium", l: "Medium" },
+          { v: "dense", l: "Dense" },
+        ]),
+      ),
+      h(
+        "label",
+        { class: "fld" },
         h("span", null, "Set as Starting Map"),
-        chk(work, "setStart")
-      )
+        chk(work, "setStart"),
+      ),
     );
 
     modal({
       title: "Generate Random Map",
       content,
       buttons: [
-        { label: "Generate", primary: true, onClick(close) {
-          const m = performMapGeneration(work);
-          proj.maps.push(m);
-          curMapId = m.id;
-          if (work.setStart) {
-            proj.system.startMapId = m.id;
-            proj.system.startX = m.tempStartX;
-            proj.system.startY = m.tempStartY;
-          }
-          delete m.tempStartX;
-          delete m.tempStartY;
-          
-          close();
-          rebuildMapList();
-          renderMap();
-          touch();
-          flashStatus(`Generated map "${m.name}"`);
-        } },
-        { label: "Cancel" }
-      ]
+        {
+          label: "Generate",
+          primary: true,
+          onClick(close) {
+            const m = performMapGeneration(work);
+            proj.maps.push(m);
+            curMapId = m.id;
+            if (work.setStart) {
+              proj.system.startMapId = m.id;
+              proj.system.startX = m.tempStartX;
+              proj.system.startY = m.tempStartY;
+            }
+            delete m.tempStartX;
+            delete m.tempStartY;
+
+            close();
+            rebuildMapList();
+            renderMap();
+            touch();
+            flashStatus(`Generated map "${m.name}"`);
+          },
+        },
+        { label: "Cancel" },
+      ],
     });
   }
 
@@ -1915,13 +2789,16 @@ const editorI18n = await createEditorI18n({
     const h = parseInt(opts.height) || 15;
     const n = w * h;
     const id = RA.nextId(proj.maps);
-    
+
     let music = "field";
     if (opts.theme === "grassland" || opts.theme === "swamp") music = "town";
     if (opts.theme === "cave") music = "cave";
-    
+
     const m = {
-      id, name: opts.name || ("Random Map " + id), width: w, height: h,
+      id,
+      name: opts.name || "Random Map " + id,
+      width: w,
+      height: h,
       music,
       encounters: { troops: [], rate: 0 },
       layers: {
@@ -1934,16 +2811,16 @@ const editorI18n = await createEditorI18n({
       passOv: new Array(n).fill(0),
       events: [],
     };
-    
+
     const T = Assets.T;
-    
+
     const themes = {
       grassland: {
         floor: T.grass,
         patches: [
           { t: T.flowers, p: 0.08 },
           { t: T.tallgrass, p: 0.12 },
-          { t: T.dirt, p: 0.05 }
+          { t: T.dirt, p: 0.05 },
         ],
         water: T.water,
         deepwater: T.deepwater,
@@ -1953,28 +2830,24 @@ const editorI18n = await createEditorI18n({
           { t: T.pine, w: 3 },
           { t: T.bush, w: 3 },
           { t: T.rock, w: 2 },
-          { t: T.flowerpot, w: 1 }
-        ]
+          { t: T.flowerpot, w: 1 },
+        ],
       },
       desert: {
         floor: T.sand,
-        patches: [
-          { t: T.dirt, p: 0.08 }
-        ],
+        patches: [{ t: T.dirt, p: 0.08 }],
         water: T.water,
         deepwater: T.deepwater,
         wall: T.wall_brick,
         decor: [
           { t: T.cactus, w: 6 },
           { t: T.deadtree, w: 3 },
-          { t: T.rock, w: 3 }
-        ]
+          { t: T.rock, w: 3 },
+        ],
       },
       cave: {
         floor: T.cavefloor,
-        patches: [
-          { t: T.crystalfloor, p: 0.15 }
-        ],
+        patches: [{ t: T.crystalfloor, p: 0.15 }],
         water: T.lava,
         deepwater: T.lava,
         wall: T.cavewall,
@@ -1982,14 +2855,12 @@ const editorI18n = await createEditorI18n({
           { t: T.mushroom, w: 4 },
           { t: T.rock, w: 4 },
           { t: T.crystals, w: 3 },
-          { t: T.lava_rock, w: 1 }
-        ]
+          { t: T.lava_rock, w: 1 },
+        ],
       },
       snow: {
         floor: T.snow,
-        patches: [
-          { t: T.ice, p: 0.15 }
-        ],
+        patches: [{ t: T.ice, p: 0.15 }],
         water: T.water,
         deepwater: T.deepwater,
         wall: T.wall_stone,
@@ -1997,14 +2868,12 @@ const editorI18n = await createEditorI18n({
           { t: T.snowtree, w: 5 },
           { t: T.pine, w: 4 },
           { t: T.rock, w: 2 },
-          { t: T.pillar, w: 1 }
-        ]
+          { t: T.pillar, w: 1 },
+        ],
       },
       swamp: {
         floor: T.dirt,
-        patches: [
-          { t: T.grass, p: 0.15 }
-        ],
+        patches: [{ t: T.grass, p: 0.15 }],
         water: T.swamp,
         deepwater: T.swamp,
         wall: T.wall_wood,
@@ -2012,14 +2881,14 @@ const editorI18n = await createEditorI18n({
           { t: T.deadtree, w: 5 },
           { t: T.waterlily, w: 3 },
           { t: T.rock, w: 2 },
-          { t: T.cobweb, w: 1 }
-        ]
-      }
+          { t: T.cobweb, w: 1 },
+        ],
+      },
     };
-    
+
     const th = themes[opts.theme] || themes.grassland;
     let grid = Array.from({ length: h }, () => new Array(w).fill(false));
-    
+
     if (opts.style === "cellular") {
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
@@ -2050,7 +2919,7 @@ const editorI18n = await createEditorI18n({
         }
         grid = nextGrid;
       }
-      
+
       const visited = Array.from({ length: h }, () => new Array(w).fill(false));
       const components = [];
       for (let y = 1; y < h - 1; y++) {
@@ -2062,7 +2931,12 @@ const editorI18n = await createEditorI18n({
             while (queue.length > 0) {
               const [cx, cy] = queue.shift();
               comp.push([cx, cy]);
-              const neighbors = [[cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]];
+              const neighbors = [
+                [cx + 1, cy],
+                [cx - 1, cy],
+                [cx, cy + 1],
+                [cx, cy - 1],
+              ];
               for (const [nx, ny] of neighbors) {
                 if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
                   if (!grid[ny][nx] && !visited[ny][nx]) {
@@ -2076,16 +2950,17 @@ const editorI18n = await createEditorI18n({
           }
         }
       }
-      
+
       let largest = [];
       for (const comp of components) {
         if (comp.length > largest.length) {
           largest = comp;
         }
       }
-      
+
       if (largest.length === 0) {
-        const cx = Math.floor(w / 2), cy = Math.floor(h / 2);
+        const cx = Math.floor(w / 2),
+          cy = Math.floor(h / 2);
         for (let dy = -1; dy <= 1; dy++) {
           for (let dx = -1; dx <= 1; dx++) {
             grid[cy + dy][cx + dx] = false;
@@ -2093,7 +2968,7 @@ const editorI18n = await createEditorI18n({
           }
         }
       }
-      
+
       const finalFloorSet = new Set(largest.map(([x, y]) => `${x},${y}`));
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
@@ -2102,16 +2977,17 @@ const editorI18n = await createEditorI18n({
           }
         }
       }
-      
     } else if (opts.style === "islands") {
-      const cx = w / 2, cy = h / 2;
+      const cx = w / 2,
+        cy = h / 2;
       const maxD = Math.sqrt(cx * cx + cy * cy);
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
           if (x === 0 || y === 0 || x === w - 1 || y === h - 1) {
             grid[y][x] = true;
           } else {
-            const dx = x - cx, dy = y - cy;
+            const dx = x - cx,
+              dy = y - cy;
             const d = Math.sqrt(dx * dx + dy * dy);
             const landProb = 0.65 * (1 - d / maxD);
             grid[y][x] = Math.random() > Math.max(0.1, landProb);
@@ -2138,20 +3014,26 @@ const editorI18n = await createEditorI18n({
         }
         grid = nextGrid;
       }
-      
     } else if (opts.style === "maze") {
       grid = Array.from({ length: h }, () => new Array(w).fill(true));
       const stack = [];
-      const startX = 1, startY = 1;
+      const startX = 1,
+        startY = 1;
       grid[startY][startX] = false;
       stack.push([startX, startY]);
-      
+
       while (stack.length > 0) {
         const [cx, cy] = stack[stack.length - 1];
         const neighbors = [];
-        const dirs = [[0, -2], [0, 2], [-2, 0], [2, 0]];
+        const dirs = [
+          [0, -2],
+          [0, 2],
+          [-2, 0],
+          [2, 0],
+        ];
         for (const [dx, dy] of dirs) {
-          const nx = cx + dx, ny = cy + dy;
+          const nx = cx + dx,
+            ny = cy + dy;
           if (nx > 0 && nx < w - 1 && ny > 0 && ny < h - 1) {
             if (grid[ny][nx]) {
               neighbors.push([nx, ny, dx, dy]);
@@ -2159,7 +3041,8 @@ const editorI18n = await createEditorI18n({
           }
         }
         if (neighbors.length > 0) {
-          const [nx, ny, dx, dy] = neighbors[Math.floor(Math.random() * neighbors.length)];
+          const [nx, ny, dx, dy] =
+            neighbors[Math.floor(Math.random() * neighbors.length)];
           grid[ny][nx] = false;
           grid[cy + dy / 2][cx + dx / 2] = false;
           stack.push([nx, ny]);
@@ -2167,7 +3050,7 @@ const editorI18n = await createEditorI18n({
           stack.pop();
         }
       }
-      
+
       for (let y = 1; y < h - 1; y++) {
         for (let x = 1; x < w - 1; x++) {
           if (grid[y][x] && Math.random() < 0.08) {
@@ -2179,7 +3062,6 @@ const editorI18n = await createEditorI18n({
           }
         }
       }
-      
     } else {
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
@@ -2201,13 +3083,18 @@ const editorI18n = await createEditorI18n({
         }
       }
     }
-    
+
     const ground = m.layers.ground;
     const decor = m.layers.decor;
-    
+
     const isPond = new Array(n).fill(false);
     if (opts.style !== "islands") {
-      const numPonds = opts.style === "wilderness" ? Math.floor(Math.random() * 3) + 1 : (Math.random() < 0.4 ? 1 : 0);
+      const numPonds =
+        opts.style === "wilderness"
+          ? Math.floor(Math.random() * 3) + 1
+          : Math.random() < 0.4
+            ? 1
+            : 0;
       for (let p = 0; p < numPonds; p++) {
         const px = Math.floor(Math.random() * (w - 6)) + 3;
         const py = Math.floor(Math.random() * (h - 6)) + 3;
@@ -2215,7 +3102,8 @@ const editorI18n = await createEditorI18n({
         for (let y = py - pr; y <= py + pr; y++) {
           for (let x = px - pr; x <= px + pr; x++) {
             if (x > 0 && x < w - 1 && y > 0 && y < h - 1 && !grid[y][x]) {
-              const dx = x - px, dy = y - py;
+              const dx = x - px,
+                dy = y - py;
               if (dx * dx + dy * dy <= pr * pr + 1) {
                 isPond[y * w + x] = true;
               }
@@ -2224,7 +3112,7 @@ const editorI18n = await createEditorI18n({
         }
       }
     }
-    
+
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         const i = y * w + x;
@@ -2248,7 +3136,7 @@ const editorI18n = await createEditorI18n({
         }
       }
     }
-    
+
     const walkable = [];
     for (let y = 1; y < h - 1; y++) {
       for (let x = 1; x < w - 1; x++) {
@@ -2258,21 +3146,22 @@ const editorI18n = await createEditorI18n({
         }
       }
     }
-    
+
     if (walkable.length === 0) {
-      const cx = Math.floor(w / 2), cy = Math.floor(h / 2);
+      const cx = Math.floor(w / 2),
+        cy = Math.floor(h / 2);
       grid[cy][cx] = false;
       isPond[cy * w + cx] = false;
       ground[cy * w + cx] = th.floor;
       walkable.push({ x: cx, y: cy });
     }
-    
+
     const startIdx = Math.floor(Math.random() * walkable.length);
     const startCell = walkable[startIdx];
     m.tempStartX = startCell.x;
     m.tempStartY = startCell.y;
     walkable.splice(startIdx, 1);
-    
+
     let exitCell = null;
     let maxD2 = -1;
     let exitIdx = -1;
@@ -2289,29 +3178,49 @@ const editorI18n = await createEditorI18n({
     if (exitCell && exitIdx >= 0) {
       walkable.splice(exitIdx, 1);
       const eId = RA.nextId(m.events);
-      const e = DataDefaults.newEvent(eId, exitCell.x, exitCell.y, "Exit Portal");
-      
-      const exitTile = (opts.theme === "cave" || opts.theme === "snow") ? T.stairs : T.path;
+      const e = DataDefaults.newEvent(
+        eId,
+        exitCell.x,
+        exitCell.y,
+        "Exit Portal",
+      );
+
+      const exitTile =
+        opts.theme === "cave" || opts.theme === "snow" ? T.stairs : T.path;
       m.layers.ground[exitCell.y * w + exitCell.x] = exitTile;
-      
+
       e.pages[0] = {
-        cond: { switchId: 0, varId: 0, varVal: 0, selfSw: "", questId: 0, questStatus: "active", objectiveQuestId: 0, objectiveIndex: 0, objectiveStatus: "completed" },
-        charset: "", dir: 0,
-        moveType: "fixed", trigger: "touch", priority: "below", through: true,
+        cond: {
+          switchId: 0,
+          varId: 0,
+          varVal: 0,
+          selfSw: "",
+          questId: 0,
+          questStatus: "active",
+          objectiveQuestId: 0,
+          objectiveIndex: 0,
+          objectiveStatus: "completed",
+        },
+        charset: "",
+        dir: 0,
+        moveType: "fixed",
+        trigger: "touch",
+        priority: "below",
+        through: true,
         commands: [
           { t: "se", name: "door" },
           { t: "transfer", mapId: 1, x: 12, y: 12, dir: 0 },
-          { t: "text", name: "", text: "Returned to the village!" }
+          { t: "text", name: "", text: "Returned to the village!" },
         ],
       };
       m.events.push(e);
     }
-    
+
     function addRandomChest(cx, cy) {
       const eId = RA.nextId(m.events);
       const evName = "Chest" + String(eId).padStart(3, "0");
       const e = DataDefaults.newEvent(eId, cx, cy, evName);
-      
+
       const roll = Math.random();
       let cmd = [];
       let lootName = "";
@@ -2330,18 +3239,48 @@ const editorI18n = await createEditorI18n({
       } else {
         const isWeapon = Math.random() < 0.5;
         const itemId = Math.floor(Math.random() * 3) + 1;
-        cmd.push({ t: "item", kind: isWeapon ? "weapon" : "armor", id: itemId, op: "add", val: 1 });
+        cmd.push({
+          t: "item",
+          kind: isWeapon ? "weapon" : "armor",
+          id: itemId,
+          op: "add",
+          val: 1,
+        });
         if (isWeapon) {
-          lootName = itemId === 1 ? "Bronze Sword" : itemId === 2 ? "Iron Sword" : "Oak Staff";
+          lootName =
+            itemId === 1
+              ? "Bronze Sword"
+              : itemId === 2
+                ? "Iron Sword"
+                : "Oak Staff";
         } else {
-          lootName = itemId === 1 ? "Leather Vest" : itemId === 2 ? "Chainmail" : "Cloth Robe";
+          lootName =
+            itemId === 1
+              ? "Leather Vest"
+              : itemId === 2
+                ? "Chainmail"
+                : "Cloth Robe";
         }
       }
-      
+
       e.pages[0] = {
-        cond: { switchId: 0, varId: 0, varVal: 0, selfSw: "", questId: 0, questStatus: "active", objectiveQuestId: 0, objectiveIndex: 0, objectiveStatus: "completed" },
-        charset: "chest", dir: 0,
-        moveType: "fixed", trigger: "action", priority: "same", through: false,
+        cond: {
+          switchId: 0,
+          varId: 0,
+          varVal: 0,
+          selfSw: "",
+          questId: 0,
+          questStatus: "active",
+          objectiveQuestId: 0,
+          objectiveIndex: 0,
+          objectiveStatus: "completed",
+        },
+        charset: "chest",
+        dir: 0,
+        moveType: "fixed",
+        trigger: "action",
+        priority: "same",
+        through: false,
         commands: [
           { t: "se", name: "chest" },
           ...cmd,
@@ -2350,28 +3289,43 @@ const editorI18n = await createEditorI18n({
         ],
       };
       e.pages.push({
-        cond: { switchId: 0, varId: 0, varVal: 0, selfSw: "A", questId: 0, questStatus: "active", objectiveQuestId: 0, objectiveIndex: 0, objectiveStatus: "completed" },
-        charset: "chest_open", dir: 0,
-        moveType: "fixed", trigger: "action", priority: "same", through: false,
-        commands: [
-          { t: "text", name: "", text: "The chest is empty." }
-        ],
+        cond: {
+          switchId: 0,
+          varId: 0,
+          varVal: 0,
+          selfSw: "A",
+          questId: 0,
+          questStatus: "active",
+          objectiveQuestId: 0,
+          objectiveIndex: 0,
+          objectiveStatus: "completed",
+        },
+        charset: "chest_open",
+        dir: 0,
+        moveType: "fixed",
+        trigger: "action",
+        priority: "same",
+        through: false,
+        commands: [{ t: "text", name: "", text: "The chest is empty." }],
       });
       m.events.push(e);
     }
-    
-    const numChests = Math.min(walkable.length, Math.floor(Math.random() * 3) + 1);
+
+    const numChests = Math.min(
+      walkable.length,
+      Math.floor(Math.random() * 3) + 1,
+    );
     for (let i = 0; i < numChests; i++) {
       const cIdx = Math.floor(Math.random() * walkable.length);
       const cCell = walkable[cIdx];
       walkable.splice(cIdx, 1);
       addRandomChest(cCell.x, cCell.y);
     }
-    
+
     let decorProb = 0.12;
     if (opts.density === "sparse") decorProb = 0.05;
     if (opts.density === "dense") decorProb = 0.22;
-    
+
     const dList = th.decor;
     const totalWeight = dList.reduce((sum, item) => sum + item.w, 0);
     function pickDecor() {
@@ -2382,13 +3336,13 @@ const editorI18n = await createEditorI18n({
       }
       return dList[0].t;
     }
-    
+
     for (const cell of walkable) {
       if (Math.random() < decorProb) {
         decor[cell.y * w + cell.x] = pickDecor();
       }
     }
-    
+
     if (opts.theme === "swamp") {
       for (let y = 1; y < h - 1; y++) {
         for (let x = 1; x < w - 1; x++) {
@@ -2399,89 +3353,175 @@ const editorI18n = await createEditorI18n({
         }
       }
     }
-    
+
     return m;
   }
 
   function openMapProps() {
     const m = curMap();
-    const work = { name: m.name, width: m.width, height: m.height, music: m.music || "none", rate: m.encounters.rate };
+    const work = {
+      name: m.name,
+      width: m.width,
+      height: m.height,
+      music: m.music || "none",
+      rate: m.encounters.rate,
+    };
     const troopBox = h("div", { class: "minilist" });
     const encTroops = m.encounters.troops.slice();
     function redrawTroops() {
       troopBox.innerHTML = "";
       encTroops.forEach((tid, i) => {
         const tr = RA.byId(proj.troops, tid);
-        troopBox.appendChild(h("div", { class: "minirow" },
-          h("span", null, tr ? tr.name : "(missing)"),
-          h("button", { class: "mini", onclick() { encTroops.splice(i, 1); redrawTroops(); } }, "✕")));
+        troopBox.appendChild(
+          h(
+            "div",
+            { class: "minirow" },
+            h("span", null, tr ? tr.name : "(missing)"),
+            h(
+              "button",
+              {
+                class: "mini",
+                onclick() {
+                  encTroops.splice(i, 1);
+                  redrawTroops();
+                },
+              },
+              "✕",
+            ),
+          ),
+        );
       });
       const pick = { id: proj.troops.length ? proj.troops[0].id : 0 };
       const s = sel(pick, "id", dbOpts(proj.troops));
-      troopBox.appendChild(h("div", { class: "minirow" }, s,
-        h("button", { class: "mini", onclick() { if (pick.id) { encTroops.push(pick.id); redrawTroops(); } } }, "+ add")));
+      troopBox.appendChild(
+        h(
+          "div",
+          { class: "minirow" },
+          s,
+          h(
+            "button",
+            {
+              class: "mini",
+              onclick() {
+                if (pick.id) {
+                  encTroops.push(pick.id);
+                  redrawTroops();
+                }
+              },
+            },
+            "+ add",
+          ),
+        ),
+      );
     }
     redrawTroops();
     const hd = m.hd2d || {};
     const hdW = {
       enabled: !!hd.enabled,
       tilt: Math.min(89, Math.max(25, Number(hd.tilt) || 50)),
-      bloom: !!hd.bloom, dof: !!hd.dof, fog: !!hd.fog,
+      bloom: !!hd.bloom,
+      dof: !!hd.dof,
+      fog: !!hd.fog,
       fogColor: (hd.fog && hd.fog.color) || "#101018",
       lights: !!hd.lights,
       ambient: hd.ambient == null ? 0.45 : Number(hd.ambient),
     };
-    const fogColorIn = h("input", { type: "color", value: hdW.fogColor,
-      oninput(e) { hdW.fogColor = e.target.value; } });
-    const content = h("div", null,
+    const fogColorIn = h("input", {
+      type: "color",
+      value: hdW.fogColor,
+      oninput(e) {
+        hdW.fogColor = e.target.value;
+      },
+    });
+    const content = h(
+      "div",
+      null,
       field("Name", tIn(work, "name")),
-      row(field("Width", nIn(work, "width", 5, 200)), field("Height", nIn(work, "height", 5, 200))),
+      row(
+        field("Width", nIn(work, "width", 5, 200)),
+        field("Height", nIn(work, "height", 5, 200)),
+      ),
       field("Music", sel(work, "music", MUSIC_OPTS())),
       field("Encounter rate (steps, 0 = off)", nIn(work, "rate", 0, 999)),
       h("div", { class: "fld" }, h("span", null, "Encounter troops"), troopBox),
-      h("div", { class: "fld" }, h("span", null, "HD-2D (3D perspective rendering)")),
-      row(field("Enabled", chk(hdW, "enabled")), field("Camera tilt (25–89°)", nIn(hdW, "tilt", 25, 89))),
-      row(field("Bloom", chk(hdW, "bloom")), field("Depth of field", chk(hdW, "dof"))),
-      row(field("Distance fog", chk(hdW, "fog")), field("Fog color", fogColorIn)),
-      row(field("Point lights", chk(hdW, "lights")), field("Ambient light (0–2)", nIn(hdW, "ambient", 0, 2, 0.05))),
-      h("div", { class: "dim" }, "Paint elevation in Height mode (H). Lights are events named “light #rrggbb radius”. Preview with Game ▸ HD-2D Preview."),
+      h(
+        "div",
+        { class: "fld" },
+        h("span", null, "HD-2D (3D perspective rendering)"),
+      ),
+      row(
+        field("Enabled", chk(hdW, "enabled")),
+        field("Camera tilt (25–89°)", nIn(hdW, "tilt", 25, 89)),
+      ),
+      row(
+        field("Bloom", chk(hdW, "bloom")),
+        field("Depth of field", chk(hdW, "dof")),
+      ),
+      row(
+        field("Distance fog", chk(hdW, "fog")),
+        field("Fog color", fogColorIn),
+      ),
+      row(
+        field("Point lights", chk(hdW, "lights")),
+        field("Ambient light (0–2)", nIn(hdW, "ambient", 0, 2, 0.05)),
+      ),
+      h(
+        "div",
+        { class: "dim" },
+        "Paint elevation in Height mode (H). Lights are events named “light #rrggbb radius”. Preview with Game ▸ HD-2D Preview.",
+      ),
     );
     modal({
       title: "Map Properties",
       content,
       buttons: [
-        { label: t("btn.ok"), primary: true, onClick(close) {
-          m.name = work.name;
-          m.music = work.music;
-          m.encounters = { rate: work.rate, troops: encTroops };
-          m.hd2d = {
-            enabled: hdW.enabled, tilt: hdW.tilt,
-            bloom: hdW.bloom, dof: hdW.dof,
-            fog: hdW.fog ? { color: hdW.fogColor } : false,
-            lights: hdW.lights, ambient: hdW.ambient,
-          };
-          if (work.width !== m.width || work.height !== m.height) resizeMap(m, work.width, work.height);
-          close(); rebuildMapList(); renderMap(); touch();
-          hdMarkDirty();
-        } },
+        {
+          label: t("btn.ok"),
+          primary: true,
+          onClick(close) {
+            m.name = work.name;
+            m.music = work.music;
+            m.encounters = { rate: work.rate, troops: encTroops };
+            m.hd2d = {
+              enabled: hdW.enabled,
+              tilt: hdW.tilt,
+              bloom: hdW.bloom,
+              dof: hdW.dof,
+              fog: hdW.fog ? { color: hdW.fogColor } : false,
+              lights: hdW.lights,
+              ambient: hdW.ambient,
+            };
+            if (work.width !== m.width || work.height !== m.height)
+              resizeMap(m, work.width, work.height);
+            close();
+            rebuildMapList();
+            renderMap();
+            touch();
+            hdMarkDirty();
+          },
+        },
         { label: "Cancel" },
       ],
     });
   }
   function resizeMap(m, w, h2) {
-    w = Math.max(5, Math.min(200, w)); h2 = Math.max(5, Math.min(200, h2));
+    w = Math.max(5, Math.min(200, w));
+    h2 = Math.max(5, Math.min(200, h2));
     const remap = (old, fill) => {
       const arr = new Array(w * h2).fill(fill);
       for (let y = 0; y < Math.min(m.height, h2); y++) {
-        for (let x = 0; x < Math.min(m.width, w); x++) arr[y * w + x] = old[y * m.width + x];
+        for (let x = 0; x < Math.min(m.width, w); x++)
+          arr[y * w + x] = old[y * m.width + x];
       }
       return arr;
     };
-    for (const ln of LAYER_ORDER) m.layers[ln] = remap(m.layers[ln], ln === "ground" ? Assets.T.grass : 0);
+    for (const ln of LAYER_ORDER)
+      m.layers[ln] = remap(m.layers[ln], ln === "ground" ? Assets.T.grass : 0);
     m.shadows = remap(m.shadows, 0);
     m.passOv = remap(m.passOv, 0);
     m.heights = remap(heightsOf(m), 0);
-    m.width = w; m.height = h2;
+    m.width = w;
+    m.height = h2;
     m.events = m.events.filter((e) => e.x < w && e.y < h2);
   }
 
@@ -2489,9 +3529,15 @@ const editorI18n = await createEditorI18n({
   // A floating panel that renders the current map through the game's WebGL2
   // renderer (js/gl.js) using the map's own hd2d settings. It rebuilds after
   // edits (debounced — touch() marks it dirty) and re-renders every frame.
-  let hdPanel = null, hdCanvas = null, hdDirty = true, hdMapId = 0, hdLastBuild = 0, hdRAF = 0;
-  let hdCamX = 0, hdCamY = 0; // camera look-at center, world px
-  let hdKick = null;          // one-shot refresh timer (covers rAF pauses in hidden windows)
+  let hdPanel = null,
+    hdCanvas = null,
+    hdDirty = true,
+    hdMapId = 0,
+    hdLastBuild = 0,
+    hdRAF = 0;
+  let hdCamX = 0,
+    hdCamY = 0; // camera look-at center, world px
+  let hdKick = null; // one-shot refresh timer (covers rAF pauses in hidden windows)
 
   function hdMarkDirty() {
     hdDirty = true;
@@ -2500,7 +3546,8 @@ const editorI18n = await createEditorI18n({
     hdKick = setTimeout(hdRenderOnce, 400);
   }
 
-  function hdParseLight(name) { // mirrors the engine's light-event convention
+  function hdParseLight(name) {
+    // mirrors the engine's light-event convention
     if (!/^light\b/i.test(name || "")) return null;
     const light = { color: "#ffcc88", radius: 180 };
     for (const tok of String(name).slice(5).trim().split(/\s+/)) {
@@ -2509,13 +3556,18 @@ const editorI18n = await createEditorI18n({
     }
     return light;
   }
-  function hdBuildBuffers(m) { // same composition as the engine's prerenderMap
+  function hdBuildBuffers(m) {
+    // same composition as the engine's prerenderMap
     const lower = document.createElement("canvas");
-    lower.width = m.width * TILE; lower.height = m.height * TILE;
+    lower.width = m.width * TILE;
+    lower.height = m.height * TILE;
     const upper = document.createElement("canvas");
-    upper.width = lower.width; upper.height = lower.height;
-    const lg = lower.getContext("2d"), ug = upper.getContext("2d");
-    lg.fillStyle = "#101018"; lg.fillRect(0, 0, lower.width, lower.height);
+    upper.width = lower.width;
+    upper.height = lower.height;
+    const lg = lower.getContext("2d"),
+      ug = upper.getContext("2d");
+    lg.fillStyle = "#101018";
+    lg.fillRect(0, 0, lower.width, lower.height);
     for (let y = 0; y < m.height; y++) {
       for (let x = 0; x < m.width; x++) {
         const i = y * m.width + x;
@@ -2547,28 +3599,45 @@ const editorI18n = await createEditorI18n({
     if (!m) return;
     const now = performance.now();
     if ((hdDirty || hdMapId !== m.id) && now - hdLastBuild > 300) {
-      if (hdMapId !== m.id) { hdCamX = m.width * TILE / 2; hdCamY = m.height * TILE / 2; }
+      if (hdMapId !== m.id) {
+        hdCamX = (m.width * TILE) / 2;
+        hdCamY = (m.height * TILE) / 2;
+      }
       const b = hdBuildBuffers(m);
       GLRender.setMap(b.lower, b.upper, m);
-      hdMapId = m.id; hdDirty = false; hdLastBuild = now;
+      hdMapId = m.id;
+      hdDirty = false;
+      hdLastBuild = now;
     }
-    const w = hdCanvas.width, hgt = hdCanvas.height;
+    const w = hdCanvas.width,
+      hgt = hdCanvas.height;
     const camX = Math.max(0, Math.min(hdCamX - w / 2, m.width * TILE - w));
     const camY = Math.max(0, Math.min(hdCamY - hgt / 2, m.height * TILE - hgt));
-    const sprites = [], lights = [];
+    const sprites = [],
+      lights = [];
     for (const ev of m.events) {
       const pg = ev.pages[0];
       const L = hdParseLight(ev.name);
-      if (L) lights.push({ rx: ev.x, ry: ev.y, color: L.color, radius: L.radius });
+      if (L)
+        lights.push({ rx: ev.x, ry: ev.y, color: L.color, radius: L.radius });
       if (pg && pg.charset) {
         const ci = Assets.charsetIndex(pg.charset);
-        if (ci >= 0) sprites.push({ canvas: Assets.charFrameCanvas(ci, pg.dir || 0, 1), rx: ev.x, ry: ev.y, pr: 1 });
+        if (ci >= 0)
+          sprites.push({
+            canvas: Assets.charFrameCanvas(ci, pg.dir || 0, 1),
+            rx: ev.x,
+            ry: ev.y,
+            pr: 1,
+          });
       }
     }
     const hd2d = m.hd2d || {};
     const ambient = hd2d.ambient != null ? Number(hd2d.ambient) : 0.45;
-    const frame = GLRender.renderFrame(w, hgt, camX, camY, sprites,
-      { lights, ambient, focus: { rx: (camX + w / 2) / TILE, ry: (camY + hgt / 2) / TILE } });
+    const frame = GLRender.renderFrame(w, hgt, camX, camY, sprites, {
+      lights,
+      ambient,
+      focus: { rx: (camX + w / 2) / TILE, ry: (camY + hgt / 2) / TILE },
+    });
     if (frame) hdCanvas.getContext("2d").drawImage(frame, 0, 0);
   }
   function hdFrame() {
@@ -2583,17 +3652,24 @@ const editorI18n = await createEditorI18n({
     window.removeEventListener("mousemove", hdPanel._move);
     window.removeEventListener("mouseup", hdPanel._up);
     hdPanel.remove();
-    hdPanel = null; hdCanvas = null;
+    hdPanel = null;
+    hdCanvas = null;
     refreshToolbar();
   }
   function toggleHdPreview() {
-    if (hdPanel) { closeHdPreview(); return; }
+    if (hdPanel) {
+      closeHdPreview();
+      return;
+    }
     // The in-editor HD-2D live preview was built on the old synchronous GLRender. The new
     // PIXI renderer (Renderer, aliased to GLRender) is async and renders to its own canvas,
     // so this preview needs a PIXI rewrite — disable it gracefully until then rather than
     // throwing every frame. (The in-game HD-2D rendering uses the new renderer fully.)
-    const asyncRenderer = typeof GLRender !== "undefined" && GLRender.available &&
-      GLRender.available.constructor && GLRender.available.constructor.name === "AsyncFunction";
+    const asyncRenderer =
+      typeof GLRender !== "undefined" &&
+      GLRender.available &&
+      GLRender.available.constructor &&
+      GLRender.available.constructor.name === "AsyncFunction";
     if (typeof GLRender === "undefined" || asyncRenderer) {
       flashStatus(t("status.preview_unavailable"));
       return;
@@ -2602,15 +3678,29 @@ const editorI18n = await createEditorI18n({
       flashStatus(t("status.webgl2_required"));
       return;
     }
-    hdCanvas = h("canvas", { width: 480, height: 360, style: "display:block;cursor:grab" });
-    hdPanel = h("div", {
-      style: "position:fixed;right:18px;bottom:38px;z-index:90;border:1px solid #3a3a4a;border-radius:6px;" +
-        "overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,0.5);background:#101018",
-    },
-      h("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 8px;background:#22222e;color:#cfd2e0;font:12px system-ui" },
+    hdCanvas = h("canvas", {
+      width: 480,
+      height: 360,
+      style: "display:block;cursor:grab",
+    });
+    hdPanel = h(
+      "div",
+      {
+        style:
+          "position:fixed;right:18px;bottom:38px;z-index:90;border:1px solid #3a3a4a;border-radius:6px;" +
+          "overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,0.5);background:#101018",
+      },
+      h(
+        "div",
+        {
+          style:
+            "display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 8px;background:#22222e;color:#cfd2e0;font:12px system-ui",
+        },
         h("span", null, "HD-2D Preview — drag to pan"),
-        h("button", { class: "mini", onclick: closeHdPreview }, "✕")),
-      hdCanvas);
+        h("button", { class: "mini", onclick: closeHdPreview }, "✕"),
+      ),
+      hdCanvas,
+    );
     let drag = null;
     hdCanvas.addEventListener("mousedown", (e) => {
       drag = { x: e.clientX, y: e.clientY };
@@ -2623,68 +3713,221 @@ const editorI18n = await createEditorI18n({
       hdCamY -= (e.clientY - drag.y) * 1.6; // the tilt foreshortens the z axis
       drag = { x: e.clientX, y: e.clientY };
     };
-    hdPanel._up = () => { drag = null; if (hdCanvas) hdCanvas.style.cursor = "grab"; };
+    hdPanel._up = () => {
+      drag = null;
+      if (hdCanvas) hdCanvas.style.cursor = "grab";
+    };
     window.addEventListener("mousemove", hdPanel._move);
     window.addEventListener("mouseup", hdPanel._up);
     document.body.appendChild(hdPanel);
     const m = curMap();
-    hdCamX = m.width * TILE / 2; hdCamY = m.height * TILE / 2;
-    hdMapId = 0; hdDirty = true; hdLastBuild = 0;
+    hdCamX = (m.width * TILE) / 2;
+    hdCamY = (m.height * TILE) / 2;
+    hdMapId = 0;
+    hdDirty = true;
+    hdLastBuild = 0;
     hdFrame();
     refreshToolbar();
   }
 
   // ============================ command definitions ============================
   function cmdSummary(c) {
-    const swName = (id) => id + (proj.system.switches[id - 1] ? " (" + proj.system.switches[id - 1] + ")" : "");
-    const varName = (id) => id + (proj.system.variables[id - 1] ? " (" + proj.system.variables[id - 1] + ")" : "");
-    const dbName = (arr, id) => { const e = RA.byId(arr, id); return e ? e.name : "#" + id; };
+    const swName = (id) =>
+      id +
+      (proj.system.switches[id - 1]
+        ? " (" + proj.system.switches[id - 1] + ")"
+        : "");
+    const varName = (id) =>
+      id +
+      (proj.system.variables[id - 1]
+        ? " (" + proj.system.variables[id - 1] + ")"
+        : "");
+    const dbName = (arr, id) => {
+      const e = RA.byId(arr, id);
+      return e ? e.name : "#" + id;
+    };
     const questName = (id) => dbName(proj.quests || [], id);
     const questObjName = (questId, objIndex) => {
       const q = RA.byId(proj.quests || [], questId);
-      const obj = q && Array.isArray(q.objectives) ? q.objectives[objIndex] : null;
-      return obj ? (obj.label || obj.kind || ("Objective " + (objIndex + 1))) : ("Objective " + (objIndex + 1));
+      const obj =
+        q && Array.isArray(q.objectives) ? q.objectives[objIndex] : null;
+      return obj
+        ? obj.label || obj.kind || "Objective " + (objIndex + 1)
+        : "Objective " + (objIndex + 1);
     };
     switch (c.t) {
-      case "text": return "Text" + (c.name ? " [" + c.name + "]" : "") + (c.face ? " (face)" : "") + ": " + c.text.split("\n")[0].slice(0, 42);
-      case "choices": return "Show Choices: " + c.options.join(" / ");
-      case "switch": return "Switch " + swName(c.id) + " = " + (c.val ? "ON" : "OFF");
-      case "selfsw": return "Self-Switch " + c.key + " = " + (c.val ? "ON" : "OFF");
-      case "var": return "Variable " + varName(c.id) + " " + (c.op === "set" ? "=" : c.op === "add" ? "+=" : c.op === "sub" ? "−=" : "= rnd") + " " + c.val + (c.op === "rnd" ? ".." + (c.val2 || c.val) : "");
+      case "text":
+        return (
+          "Text" +
+          (c.name ? " [" + c.name + "]" : "") +
+          (c.face ? " (face)" : "") +
+          ": " +
+          c.text.split("\n")[0].slice(0, 42)
+        );
+      case "choices":
+        return "Show Choices: " + c.options.join(" / ");
+      case "switch":
+        return "Switch " + swName(c.id) + " = " + (c.val ? "ON" : "OFF");
+      case "selfsw":
+        return "Self-Switch " + c.key + " = " + (c.val ? "ON" : "OFF");
+      case "var":
+        return (
+          "Variable " +
+          varName(c.id) +
+          " " +
+          (c.op === "set"
+            ? "="
+            : c.op === "add"
+              ? "+="
+              : c.op === "sub"
+                ? "−="
+                : "= rnd") +
+          " " +
+          c.val +
+          (c.op === "rnd" ? ".." + (c.val2 || c.val) : "")
+        );
       case "if": {
         const k = c.cond.kind;
-        let d = k === "switch" ? "Switch " + swName(c.cond.id) + (c.cond.val === false ? " is OFF" : " is ON")
-          : k === "var" ? "Var " + varName(c.cond.id) + " " + (c.cond.cmp || ">=") + " " + c.cond.val
-          : k === "selfsw" ? "Self-Switch " + c.cond.key + " is ON"
-          : k === "quest" ? "Quest " + questName(c.cond.questId) + " is " + (c.cond.status || "active")
-          : k === "item" ? "Has " + dbName(c.cond.itemKind === "weapon" ? proj.weapons : c.cond.itemKind === "armor" ? proj.armors : proj.items, c.cond.id)
-          : "Gold " + (c.cond.cmp || ">=") + " " + c.cond.val;
+        let d =
+          k === "switch"
+            ? "Switch " +
+              swName(c.cond.id) +
+              (c.cond.val === false ? " is OFF" : " is ON")
+            : k === "var"
+              ? "Var " +
+                varName(c.cond.id) +
+                " " +
+                (c.cond.cmp || ">=") +
+                " " +
+                c.cond.val
+              : k === "selfsw"
+                ? "Self-Switch " + c.cond.key + " is ON"
+                : k === "quest"
+                  ? "Quest " +
+                    questName(c.cond.questId) +
+                    " is " +
+                    (c.cond.status || "active")
+                  : k === "item"
+                    ? "Has " +
+                      dbName(
+                        c.cond.itemKind === "weapon"
+                          ? proj.weapons
+                          : c.cond.itemKind === "armor"
+                            ? proj.armors
+                            : proj.items,
+                        c.cond.id,
+                      )
+                    : "Gold " + (c.cond.cmp || ">=") + " " + c.cond.val;
         return "If " + d;
       }
-      case "questStart": return "Start Quest: " + questName(c.questId);
-      case "questAdvanceObj": return "Advance Objective: " + questName(c.questId) + " — " + questObjName(c.questId, c.objIndex) + " +" + (c.amount || 1);
-      case "questSetObj": return "Set Objective: " + questName(c.questId) + " — " + questObjName(c.questId, c.objIndex) + " = " + (c.value || 0);
-      case "questComplete": return "Complete Quest: " + questName(c.questId);
-      case "questFail": return "Fail Quest: " + questName(c.questId);
-      case "transfer": { const m = RA.byId(proj.maps, c.mapId); return "Transfer → " + (m ? m.name : "?") + " (" + c.x + "," + c.y + ")"; }
-      case "gold": return (c.op === "sub" ? "Lose" : "Gain") + " " + c.val + " " + proj.system.currency;
-      case "item": return (c.op === "sub" ? "Lose" : "Gain") + " " + dbName(c.kind === "weapon" ? proj.weapons : c.kind === "armor" ? proj.armors : proj.items, c.id) + " ×" + c.val;
-      case "party": return (c.op === "add" ? "Add" : "Remove") + " party member: " + dbName(proj.actors, c.actorId);
-      case "heal": return c.full ? "Recover All" : "Heal " + (c.hp || 0) + " HP / " + (c.mp || 0) + " MP";
-      case "battle": return "Battle: " + dbName(proj.troops, c.troopId) + (c.escape === false ? " (no escape)" : "") + (c.lose ? " (lose allowed)" : "");
-      case "shop": return "Open Shop (" + (c.goods || []).length + " goods)";
-      case "wait": return "Wait " + c.frames + " frames";
-      case "se": return "Sound: " + c.name;
-      case "music": return "Music: " + c.theme;
-      case "move": return "Move " + (c.target === "player" ? "Player" : "This Event") + ": " + c.steps.join(", ").slice(0, 40) + (c.wait ? " (wait)" : "");
-      case "cameraZoom": return "Camera Zoom: " + Math.round((c.zoom || 1) * 100) + "% over " + (c.frames || 0) + " frames";
-      case "transparency": return "Player Transparency: " + (c.val ? "hidden" : "visible");
-      case "erase": return "Erase This Event";
-      case "save": return "Open Save Screen";
-      case "gameover": return "Game Over";
-      case "totitle": return "Return to Title";
-      case "script": return "Script: " + (c.code || "").split("\n")[0].slice(0, 42);
-      default: return c.t;
+      case "questStart":
+        return "Start Quest: " + questName(c.questId);
+      case "questAdvanceObj":
+        return (
+          "Advance Objective: " +
+          questName(c.questId) +
+          " — " +
+          questObjName(c.questId, c.objIndex) +
+          " +" +
+          (c.amount || 1)
+        );
+      case "questSetObj":
+        return (
+          "Set Objective: " +
+          questName(c.questId) +
+          " — " +
+          questObjName(c.questId, c.objIndex) +
+          " = " +
+          (c.value || 0)
+        );
+      case "questComplete":
+        return "Complete Quest: " + questName(c.questId);
+      case "questFail":
+        return "Fail Quest: " + questName(c.questId);
+      case "transfer": {
+        const m = RA.byId(proj.maps, c.mapId);
+        return (
+          "Transfer → " + (m ? m.name : "?") + " (" + c.x + "," + c.y + ")"
+        );
+      }
+      case "gold":
+        return (
+          (c.op === "sub" ? "Lose" : "Gain") +
+          " " +
+          c.val +
+          " " +
+          proj.system.currency
+        );
+      case "item":
+        return (
+          (c.op === "sub" ? "Lose" : "Gain") +
+          " " +
+          dbName(
+            c.kind === "weapon"
+              ? proj.weapons
+              : c.kind === "armor"
+                ? proj.armors
+                : proj.items,
+            c.id,
+          ) +
+          " ×" +
+          c.val
+        );
+      case "party":
+        return (
+          (c.op === "add" ? "Add" : "Remove") +
+          " party member: " +
+          dbName(proj.actors, c.actorId)
+        );
+      case "heal":
+        return c.full
+          ? "Recover All"
+          : "Heal " + (c.hp || 0) + " HP / " + (c.mp || 0) + " MP";
+      case "battle":
+        return (
+          "Battle: " +
+          dbName(proj.troops, c.troopId) +
+          (c.escape === false ? " (no escape)" : "") +
+          (c.lose ? " (lose allowed)" : "")
+        );
+      case "shop":
+        return "Open Shop (" + (c.goods || []).length + " goods)";
+      case "wait":
+        return "Wait " + c.frames + " frames";
+      case "se":
+        return "Sound: " + c.name;
+      case "music":
+        return "Music: " + c.theme;
+      case "move":
+        return (
+          "Move " +
+          (c.target === "player" ? "Player" : "This Event") +
+          ": " +
+          c.steps.join(", ").slice(0, 40) +
+          (c.wait ? " (wait)" : "")
+        );
+      case "cameraZoom":
+        return (
+          "Camera Zoom: " +
+          Math.round((c.zoom || 1) * 100) +
+          "% over " +
+          (c.frames || 0) +
+          " frames"
+        );
+      case "transparency":
+        return "Player Transparency: " + (c.val ? "hidden" : "visible");
+      case "erase":
+        return "Erase This Event";
+      case "save":
+        return "Open Save Screen";
+      case "gameover":
+        return "Game Over";
+      case "totitle":
+        return "Return to Title";
+      case "script":
+        return "Script: " + (c.code || "").split("\n")[0].slice(0, 42);
+      default:
+        return c.t;
     }
   }
 
@@ -2692,65 +3935,129 @@ const editorI18n = await createEditorI18n({
   // Shows the chosen map; click a tile to set a destination. cb({ mapId, x, y }).
   function openLocationPicker(initMapId, initX, initY, cb) {
     const PS = 24; // picker pixels per tile
-    const pick = { mapId: RA.byId(proj.maps, initMapId) ? initMapId : proj.maps[0].id, x: initX, y: initY };
+    const pick = {
+      mapId: RA.byId(proj.maps, initMapId) ? initMapId : proj.maps[0].id,
+      x: initX,
+      y: initY,
+    };
     const canvas = h("canvas", { class: "locpick-canvas" });
     const ctx = canvas.getContext("2d");
     const scroll = h("div", { class: "locpick-scroll" }, canvas);
-    const info = h("span", { class: "dim", style: "margin-left:auto; align-self:center" });
+    const info = h("span", {
+      class: "dim",
+      style: "margin-left:auto; align-self:center",
+    });
     const pMap = () => RA.byId(proj.maps, pick.mapId) || proj.maps[0];
     function draw() {
       const m = pMap();
-      canvas.width = m.width * PS; canvas.height = m.height * PS;
+      canvas.width = m.width * PS;
+      canvas.height = m.height * PS;
       ctx.setTransform(PS / TILE, 0, 0, PS / TILE, 0, 0);
       ctx.imageSmoothingEnabled = false;
-      ctx.fillStyle = "#15151d"; ctx.fillRect(0, 0, m.width * TILE, m.height * TILE);
+      ctx.fillStyle = "#15151d";
+      ctx.fillRect(0, 0, m.width * TILE, m.height * TILE);
       for (const ln of LAYER_ORDER) {
         const arr = m.layers[ln];
-        for (let y = 0; y < m.height; y++) for (let x = 0; x < m.width; x++) Assets.drawTile(ctx, arr[y * m.width + x], x * TILE, y * TILE);
+        for (let y = 0; y < m.height; y++)
+          for (let x = 0; x < m.width; x++)
+            Assets.drawTile(ctx, arr[y * m.width + x], x * TILE, y * TILE);
       }
-      ctx.strokeStyle = "rgba(255,255,255,0.08)"; ctx.lineWidth = TILE / PS;
+      ctx.strokeStyle = "rgba(255,255,255,0.08)";
+      ctx.lineWidth = TILE / PS;
       ctx.beginPath();
-      for (let x = 0; x <= m.width; x++) { ctx.moveTo(x * TILE, 0); ctx.lineTo(x * TILE, m.height * TILE); }
-      for (let y = 0; y <= m.height; y++) { ctx.moveTo(0, y * TILE); ctx.lineTo(m.width * TILE, y * TILE); }
+      for (let x = 0; x <= m.width; x++) {
+        ctx.moveTo(x * TILE, 0);
+        ctx.lineTo(x * TILE, m.height * TILE);
+      }
+      for (let y = 0; y <= m.height; y++) {
+        ctx.moveTo(0, y * TILE);
+        ctx.lineTo(m.width * TILE, y * TILE);
+      }
       ctx.stroke();
-      for (const ev of m.events) { // faint event markers for orientation
+      for (const ev of m.events) {
+        // faint event markers for orientation
         ctx.fillStyle = "rgba(120,200,255,0.20)";
         ctx.fillRect(ev.x * TILE + 3, ev.y * TILE + 3, TILE - 6, TILE - 6);
       }
       if (proj.system.startMapId === m.id) {
         ctx.fillStyle = "rgba(110,230,140,0.5)";
-        ctx.fillRect(proj.system.startX * TILE + 8, proj.system.startY * TILE + 8, TILE - 16, TILE - 16);
+        ctx.fillRect(
+          proj.system.startX * TILE + 8,
+          proj.system.startY * TILE + 8,
+          TILE - 16,
+          TILE - 16,
+        );
       }
       if (pick.x >= 0 && pick.y >= 0 && pick.x < m.width && pick.y < m.height) {
         ctx.fillStyle = "rgba(255,216,106,0.32)";
         ctx.fillRect(pick.x * TILE, pick.y * TILE, TILE, TILE);
-        ctx.strokeStyle = "#ffd86a"; ctx.lineWidth = 3 * TILE / PS;
-        ctx.strokeRect(pick.x * TILE + 1, pick.y * TILE + 1, TILE - 2, TILE - 2);
+        ctx.strokeStyle = "#ffd86a";
+        ctx.lineWidth = (3 * TILE) / PS;
+        ctx.strokeRect(
+          pick.x * TILE + 1,
+          pick.y * TILE + 1,
+          TILE - 2,
+          TILE - 2,
+        );
       }
-      info.textContent = m.name + " (" + m.width + "×" + m.height + ")  ·  destination " + pick.x + ", " + pick.y;
+      info.textContent =
+        m.name +
+        " (" +
+        m.width +
+        "×" +
+        m.height +
+        ")  ·  destination " +
+        pick.x +
+        ", " +
+        pick.y;
     }
     canvas.addEventListener("mousedown", (e) => {
       const r = canvas.getBoundingClientRect();
-      const x = Math.floor((e.clientX - r.left) / PS), y = Math.floor((e.clientY - r.top) / PS);
+      const x = Math.floor((e.clientX - r.left) / PS),
+        y = Math.floor((e.clientY - r.top) / PS);
       const m = pMap();
       if (x < 0 || y < 0 || x >= m.width || y >= m.height) return;
-      pick.x = x; pick.y = y; draw();
+      pick.x = x;
+      pick.y = y;
+      draw();
     });
     const mapSel = sel(pick, "mapId", dbOpts(proj.maps), () => {
       const m = pMap();
-      pick.x = Math.min(pick.x, m.width - 1); pick.y = Math.min(pick.y, m.height - 1);
+      pick.x = Math.min(pick.x, m.width - 1);
+      pick.y = Math.min(pick.y, m.height - 1);
       draw();
     });
-    const content = h("div", null,
-      h("div", { class: "frow", style: "align-items:center" }, field("Map", mapSel), info),
-      h("div", { class: "dim", style: "margin:4px 0" }, "Click a tile to set the transfer destination."),
+    const content = h(
+      "div",
+      null,
+      h(
+        "div",
+        { class: "frow", style: "align-items:center" },
+        field("Map", mapSel),
+        info,
+      ),
+      h(
+        "div",
+        { class: "dim", style: "margin:4px 0" },
+        "Click a tile to set the transfer destination.",
+      ),
       scroll,
     );
     draw();
     modal({
-      title: "Pick Transfer Location", wide: true, dismissable: false, content,
+      title: "Pick Transfer Location",
+      wide: true,
+      dismissable: false,
+      content,
       buttons: [
-        { label: "OK", primary: true, onClick(close) { cb({ mapId: pick.mapId, x: pick.x, y: pick.y }); close(); } },
+        {
+          label: "OK",
+          primary: true,
+          onClick(close) {
+            cb({ mapId: pick.mapId, x: pick.x, y: pick.y });
+            close();
+          },
+        },
         { label: "Cancel" },
       ],
     });
@@ -2758,7 +4065,10 @@ const editorI18n = await createEditorI18n({
 
   // each entry: label, make(), form(c, box) -> apply()
   const CMD_DEFS = [
-    { t: "text", label: "Show Text", make: () => ({ t: "text", name: "", face: "", text: "" }),
+    {
+      t: "text",
+      label: "Show Text",
+      make: () => ({ t: "text", name: "", face: "", text: "" }),
       form(c, box) {
         const w = { name: c.name, face: c.face || "", text: c.text };
         const preview = h("span", { class: "char-preview" });
@@ -2767,25 +4077,72 @@ const editorI18n = await createEditorI18n({
           const ci = Assets.charsetIndex(w.face);
           if (ci >= 0) preview.appendChild(Assets.faceCanvas(ci));
         }
-        const ta = h("textarea", { rows: 4, oninput(e) { w.text = e.target.value; } }, c.text);
-        box.appendChild(row(field("Speaker name (optional)", tIn(w, "name")),
-          field("Face (optional)", sel(w, "face", charsetOpts(true), redrawFace)), preview));
-        box.appendChild(field("Text  (\\v[n]=variable, \\n[id]=actor name, \\g=gold, \\i[n]=icon)", ta));
+        const ta = h(
+          "textarea",
+          {
+            rows: 4,
+            oninput(e) {
+              w.text = e.target.value;
+            },
+          },
+          c.text,
+        );
+        box.appendChild(
+          row(
+            field("Speaker name (optional)", tIn(w, "name")),
+            field(
+              "Face (optional)",
+              sel(w, "face", charsetOpts(true), redrawFace),
+            ),
+            preview,
+          ),
+        );
+        box.appendChild(
+          field(
+            "Text  (\\v[n]=variable, \\n[id]=actor name, \\g=gold, \\i[n]=icon)",
+            ta,
+          ),
+        );
         redrawFace();
-        return () => { c.name = w.name; c.face = w.face; c.text = w.text; };
-      } },
-    { t: "choices", label: "Show Choices", make: () => ({ t: "choices", options: ["Yes", "No"], branches: [[], []] }),
+        return () => {
+          c.name = w.name;
+          c.face = w.face;
+          c.text = w.text;
+        };
+      },
+    },
+    {
+      t: "choices",
+      label: "Show Choices",
+      make: () => ({
+        t: "choices",
+        options: ["Yes", "No"],
+        branches: [[], []],
+      }),
       form(c, box) {
         const ta = h("textarea", { rows: 4 }, c.options.join("\n"));
         box.appendChild(field("Choices (one per line)", ta));
         return () => {
-          const opts = ta.value.split("\n").map((s) => s.trim()).filter(Boolean);
+          const opts = ta.value
+            .split("\n")
+            .map((s) => s.trim())
+            .filter(Boolean);
           if (!opts.length) opts.push("OK");
           const br = opts.map((_, i) => c.branches[i] || []);
-          c.options = opts; c.branches = br;
+          c.options = opts;
+          c.branches = br;
         };
-      } },
-    { t: "if", label: "Conditional Branch", make: () => ({ t: "if", cond: { kind: "switch", id: 1, val: true }, then: [], else: [] }),
+      },
+    },
+    {
+      t: "if",
+      label: "Conditional Branch",
+      make: () => ({
+        t: "if",
+        cond: { kind: "switch", id: 1, val: true },
+        then: [],
+        else: [],
+      }),
       form(c, box) {
         const w = RA.clone(c.cond);
         if (!w.kind) w.kind = "switch";
@@ -2793,22 +4150,93 @@ const editorI18n = await createEditorI18n({
         function redraw() {
           sub.innerHTML = "";
           if (w.kind === "switch") {
-            sub.appendChild(row(field("Switch", sel(w, "id", switchOpts())), field("Is", sel(w, "val", [{ v: "true", l: "ON" }, { v: "false", l: "OFF" }]))));
+            sub.appendChild(
+              row(
+                field("Switch", sel(w, "id", switchOpts())),
+                field(
+                  "Is",
+                  sel(w, "val", [
+                    { v: "true", l: "ON" },
+                    { v: "false", l: "OFF" },
+                  ]),
+                ),
+              ),
+            );
           } else if (w.kind === "var") {
-            sub.appendChild(row(field("Variable", sel(w, "id", varOpts())),
-              field("Cmp", sel(w, "cmp", [{ v: ">=", l: "≥" }, { v: "==", l: "=" }, { v: "<=", l: "≤" }])),
-              field("Value", nIn(w, "val"))));
+            sub.appendChild(
+              row(
+                field("Variable", sel(w, "id", varOpts())),
+                field(
+                  "Cmp",
+                  sel(w, "cmp", [
+                    { v: ">=", l: "≥" },
+                    { v: "==", l: "=" },
+                    { v: "<=", l: "≤" },
+                  ]),
+                ),
+                field("Value", nIn(w, "val")),
+              ),
+            );
           } else if (w.kind === "selfsw") {
-            sub.appendChild(field("Self-Switch", sel(w, "key", [{ v: "A", l: "A" }, { v: "B", l: "B" }, { v: "C", l: "C" }, { v: "D", l: "D" }])));
+            sub.appendChild(
+              field(
+                "Self-Switch",
+                sel(w, "key", [
+                  { v: "A", l: "A" },
+                  { v: "B", l: "B" },
+                  { v: "C", l: "C" },
+                  { v: "D", l: "D" },
+                ]),
+              ),
+            );
           } else if (w.kind === "quest") {
-            sub.appendChild(row(field("Quest", sel(w, "questId", dbOpts(proj.quests, "(none)"))),
-              field("Status", sel(w, "status", stringSelOpts(["inactive", "active", "completed", "failed", "abandoned"])))));
+            sub.appendChild(
+              row(
+                field(
+                  "Quest",
+                  sel(w, "questId", dbOpts(proj.quests, "(none)")),
+                ),
+                field(
+                  "Status",
+                  sel(
+                    w,
+                    "status",
+                    stringSelOpts([
+                      "inactive",
+                      "active",
+                      "completed",
+                      "failed",
+                      "abandoned",
+                    ]),
+                  ),
+                ),
+              ),
+            );
           } else if (w.kind === "item") {
-            const kindSel = sel(w, "itemKind", [{ v: "item", l: "Item" }, { v: "weapon", l: "Weapon" }, { v: "armor", l: "Armor" }], redrawItem);
-            sub.appendChild(row(field("Kind", kindSel), field("Entry", h("span", { id: "ifitem" }))));
+            const kindSel = sel(
+              w,
+              "itemKind",
+              [
+                { v: "item", l: "Item" },
+                { v: "weapon", l: "Weapon" },
+                { v: "armor", l: "Armor" },
+              ],
+              redrawItem,
+            );
+            sub.appendChild(
+              row(
+                field("Kind", kindSel),
+                field("Entry", h("span", { id: "ifitem" })),
+              ),
+            );
             redrawItem();
             function redrawItem() {
-              const arr = w.itemKind === "weapon" ? proj.weapons : w.itemKind === "armor" ? proj.armors : proj.items;
+              const arr =
+                w.itemKind === "weapon"
+                  ? proj.weapons
+                  : w.itemKind === "armor"
+                    ? proj.armors
+                    : proj.items;
               const span = sub.querySelector("#ifitem") || sub;
               span.innerHTML = "";
               span.appendChild(sel(w, "id", dbOpts(arr)));
@@ -2817,37 +4245,74 @@ const editorI18n = await createEditorI18n({
             if (!w.actorId) w.actorId = proj.actors[0] ? proj.actors[0].id : 1;
             if (!w.check) w.check = "inParty";
             if (w.itemId == null) w.itemId = 0;
-            const checkSel = sel(w, "check", [
-              { v: "inParty", l: "Is in Party" },
-              { v: "weapon", l: "Has Weapon Equipped" },
-              { v: "armor", l: "Has Armor Equipped" }
-            ], redrawActorCheck);
+            const checkSel = sel(
+              w,
+              "check",
+              [
+                { v: "inParty", l: "Is in Party" },
+                { v: "weapon", l: "Has Weapon Equipped" },
+                { v: "armor", l: "Has Armor Equipped" },
+              ],
+              redrawActorCheck,
+            );
             const itemSpan = h("span", { id: "actoritem" });
-            sub.appendChild(row(
-              field("Actor", sel(w, "actorId", dbOpts(proj.actors))),
-              field("Check", checkSel),
-              field("Equipment", itemSpan)
-            ));
+            sub.appendChild(
+              row(
+                field("Actor", sel(w, "actorId", dbOpts(proj.actors))),
+                field("Check", checkSel),
+                field("Equipment", itemSpan),
+              ),
+            );
             redrawActorCheck();
             function redrawActorCheck() {
               const span = sub.querySelector("#actoritem") || itemSpan;
               span.innerHTML = "";
               if (w.check === "weapon") {
-                span.appendChild(sel(w, "itemId", dbOpts(proj.weapons, "(none)")));
+                span.appendChild(
+                  sel(w, "itemId", dbOpts(proj.weapons, "(none)")),
+                );
               } else if (w.check === "armor") {
-                span.appendChild(sel(w, "itemId", dbOpts(proj.armors, "(none)")));
+                span.appendChild(
+                  sel(w, "itemId", dbOpts(proj.armors, "(none)")),
+                );
               } else {
                 span.appendChild(h("span", { class: "dim" }, "N/A"));
               }
             }
           } else {
-            sub.appendChild(row(field("Gold", sel(w, "cmp", [{ v: ">=", l: "≥" }, { v: "<=", l: "≤" }])), field("Value", nIn(w, "val"))));
+            sub.appendChild(
+              row(
+                field(
+                  "Gold",
+                  sel(w, "cmp", [
+                    { v: ">=", l: "≥" },
+                    { v: "<=", l: "≤" },
+                  ]),
+                ),
+                field("Value", nIn(w, "val")),
+              ),
+            );
           }
         }
-        box.appendChild(field("Condition type", sel(w, "kind", [
-          { v: "switch", l: "Switch" }, { v: "var", l: "Variable" }, { v: "selfsw", l: "Self-Switch" },
-          { v: "quest", l: "Quest Status" }, { v: "item", l: "Has item" }, { v: "gold", l: "Gold" }, { v: "actor", l: "Actor" }
-        ], redraw)));
+        box.appendChild(
+          field(
+            "Condition type",
+            sel(
+              w,
+              "kind",
+              [
+                { v: "switch", l: "Switch" },
+                { v: "var", l: "Variable" },
+                { v: "selfsw", l: "Self-Switch" },
+                { v: "quest", l: "Quest Status" },
+                { v: "item", l: "Has item" },
+                { v: "gold", l: "Gold" },
+                { v: "actor", l: "Actor" },
+              ],
+              redraw,
+            ),
+          ),
+        );
         if (w.kind === "item" && !w.itemKind) w.itemKind = "item";
         if (w.kind === "selfsw" && !w.key) w.key = "A";
         if (w.kind === "quest") {
@@ -2863,279 +4328,846 @@ const editorI18n = await createEditorI18n({
           if (!c.then) c.then = [];
           if (!c.else) c.else = [];
         };
-      } },
-    { t: "questStart", label: "Start Quest", make: () => ({ t: "questStart", questId: proj.quests[0] ? proj.quests[0].id : 0 }),
+      },
+    },
+    {
+      t: "questStart",
+      label: "Start Quest",
+      make: () => ({
+        t: "questStart",
+        questId: proj.quests[0] ? proj.quests[0].id : 0,
+      }),
       form(c, box) {
-        const w = { questId: c.questId || (proj.quests[0] ? proj.quests[0].id : 0) };
-        box.appendChild(field("Quest", sel(w, "questId", dbOpts(proj.quests, "(none)"))));
-        return () => { c.questId = w.questId; };
-      } },
-    { t: "questAdvanceObj", label: "Advance Quest Objective", make: () => ({ t: "questAdvanceObj", questId: proj.quests[0] ? proj.quests[0].id : 0, objIndex: 0, amount: 1 }),
+        const w = {
+          questId: c.questId || (proj.quests[0] ? proj.quests[0].id : 0),
+        };
+        box.appendChild(
+          field("Quest", sel(w, "questId", dbOpts(proj.quests, "(none)"))),
+        );
+        return () => {
+          c.questId = w.questId;
+        };
+      },
+    },
+    {
+      t: "questAdvanceObj",
+      label: "Advance Quest Objective",
+      make: () => ({
+        t: "questAdvanceObj",
+        questId: proj.quests[0] ? proj.quests[0].id : 0,
+        objIndex: 0,
+        amount: 1,
+      }),
       form(c, box) {
-        const w = { questId: c.questId || (proj.quests[0] ? proj.quests[0].id : 0), objIndex: c.objIndex || 0, amount: c.amount || 1 };
+        const w = {
+          questId: c.questId || (proj.quests[0] ? proj.quests[0].id : 0),
+          objIndex: c.objIndex || 0,
+          amount: c.amount || 1,
+        };
         const objWrap = h("span");
         function redrawObj() {
           const q = RA.byId(proj.quests, w.questId);
-          const opts = (q && q.objectives && q.objectives.length ? q.objectives : [{ label: "(none)" }]).map((obj, i) => ({ v: i, l: (i + 1) + ": " + (obj.label || obj.kind || "Objective") }));
+          const opts = (
+            q && q.objectives && q.objectives.length
+              ? q.objectives
+              : [{ label: "(none)" }]
+          ).map((obj, i) => ({
+            v: i,
+            l: i + 1 + ": " + (obj.label || obj.kind || "Objective"),
+          }));
           objWrap.innerHTML = "";
           objWrap.appendChild(sel(w, "objIndex", opts));
         }
         redrawObj();
-        box.appendChild(row(field("Quest", sel(w, "questId", dbOpts(proj.quests, "(none)"), redrawObj)), field("Objective", objWrap), field("Amount", nIn(w, "amount", 1, 999))));
+        box.appendChild(
+          row(
+            field(
+              "Quest",
+              sel(w, "questId", dbOpts(proj.quests, "(none)"), redrawObj),
+            ),
+            field("Objective", objWrap),
+            field("Amount", nIn(w, "amount", 1, 999)),
+          ),
+        );
         return () => Object.assign(c, w);
-      } },
-    { t: "questSetObj", label: "Set Quest Objective Progress", make: () => ({ t: "questSetObj", questId: proj.quests[0] ? proj.quests[0].id : 0, objIndex: 0, value: 0 }),
+      },
+    },
+    {
+      t: "questSetObj",
+      label: "Set Quest Objective Progress",
+      make: () => ({
+        t: "questSetObj",
+        questId: proj.quests[0] ? proj.quests[0].id : 0,
+        objIndex: 0,
+        value: 0,
+      }),
       form(c, box) {
-        const w = { questId: c.questId || (proj.quests[0] ? proj.quests[0].id : 0), objIndex: c.objIndex || 0, value: c.value || 0 };
+        const w = {
+          questId: c.questId || (proj.quests[0] ? proj.quests[0].id : 0),
+          objIndex: c.objIndex || 0,
+          value: c.value || 0,
+        };
         const objWrap = h("span");
         function redrawObj() {
           const q = RA.byId(proj.quests, w.questId);
-          const opts = (q && q.objectives && q.objectives.length ? q.objectives : [{ label: "(none)" }]).map((obj, i) => ({ v: i, l: (i + 1) + ": " + (obj.label || obj.kind || "Objective") }));
+          const opts = (
+            q && q.objectives && q.objectives.length
+              ? q.objectives
+              : [{ label: "(none)" }]
+          ).map((obj, i) => ({
+            v: i,
+            l: i + 1 + ": " + (obj.label || obj.kind || "Objective"),
+          }));
           objWrap.innerHTML = "";
           objWrap.appendChild(sel(w, "objIndex", opts));
         }
         redrawObj();
-        box.appendChild(row(field("Quest", sel(w, "questId", dbOpts(proj.quests, "(none)"), redrawObj)), field("Objective", objWrap), field("Value", nIn(w, "value", 0, 999))));
+        box.appendChild(
+          row(
+            field(
+              "Quest",
+              sel(w, "questId", dbOpts(proj.quests, "(none)"), redrawObj),
+            ),
+            field("Objective", objWrap),
+            field("Value", nIn(w, "value", 0, 999)),
+          ),
+        );
         return () => Object.assign(c, w);
-      } },
-    { t: "questComplete", label: "Complete Quest", make: () => ({ t: "questComplete", questId: proj.quests[0] ? proj.quests[0].id : 0 }),
+      },
+    },
+    {
+      t: "questComplete",
+      label: "Complete Quest",
+      make: () => ({
+        t: "questComplete",
+        questId: proj.quests[0] ? proj.quests[0].id : 0,
+      }),
       form(c, box) {
-        const w = { questId: c.questId || (proj.quests[0] ? proj.quests[0].id : 0) };
-        box.appendChild(field("Quest", sel(w, "questId", dbOpts(proj.quests, "(none)"))));
-        return () => { c.questId = w.questId; };
-      } },
-    { t: "questFail", label: "Fail Quest", make: () => ({ t: "questFail", questId: proj.quests[0] ? proj.quests[0].id : 0 }),
+        const w = {
+          questId: c.questId || (proj.quests[0] ? proj.quests[0].id : 0),
+        };
+        box.appendChild(
+          field("Quest", sel(w, "questId", dbOpts(proj.quests, "(none)"))),
+        );
+        return () => {
+          c.questId = w.questId;
+        };
+      },
+    },
+    {
+      t: "questFail",
+      label: "Fail Quest",
+      make: () => ({
+        t: "questFail",
+        questId: proj.quests[0] ? proj.quests[0].id : 0,
+      }),
       form(c, box) {
-        const w = { questId: c.questId || (proj.quests[0] ? proj.quests[0].id : 0) };
-        box.appendChild(field("Quest", sel(w, "questId", dbOpts(proj.quests, "(none)"))));
-        return () => { c.questId = w.questId; };
-      } },
-    { t: "switch", label: "Control Switch", make: () => ({ t: "switch", id: 1, val: true }),
+        const w = {
+          questId: c.questId || (proj.quests[0] ? proj.quests[0].id : 0),
+        };
+        box.appendChild(
+          field("Quest", sel(w, "questId", dbOpts(proj.quests, "(none)"))),
+        );
+        return () => {
+          c.questId = w.questId;
+        };
+      },
+    },
+    {
+      t: "switch",
+      label: "Control Switch",
+      make: () => ({ t: "switch", id: 1, val: true }),
       form(c, box) {
         const w = { id: c.id, val: String(c.val) };
-        box.appendChild(row(field("Switch", sel(w, "id", switchOpts())), field("Set", sel(w, "val", [{ v: "true", l: "ON" }, { v: "false", l: "OFF" }]))));
-        return () => { c.id = w.id; c.val = w.val === "true"; };
-      } },
-    { t: "selfsw", label: "Control Self-Switch", make: () => ({ t: "selfsw", key: "A", val: true }),
+        box.appendChild(
+          row(
+            field("Switch", sel(w, "id", switchOpts())),
+            field(
+              "Set",
+              sel(w, "val", [
+                { v: "true", l: "ON" },
+                { v: "false", l: "OFF" },
+              ]),
+            ),
+          ),
+        );
+        return () => {
+          c.id = w.id;
+          c.val = w.val === "true";
+        };
+      },
+    },
+    {
+      t: "selfsw",
+      label: "Control Self-Switch",
+      make: () => ({ t: "selfsw", key: "A", val: true }),
       form(c, box) {
         const w = { key: c.key, val: String(c.val) };
-        box.appendChild(row(field("Key", sel(w, "key", [{ v: "A", l: "A" }, { v: "B", l: "B" }, { v: "C", l: "C" }, { v: "D", l: "D" }])),
-          field("Set", sel(w, "val", [{ v: "true", l: "ON" }, { v: "false", l: "OFF" }]))));
-        return () => { c.key = w.key; c.val = w.val === "true"; };
-      } },
-    { t: "var", label: "Control Variable", make: () => ({ t: "var", id: 1, op: "set", val: 0, val2: 0 }),
+        box.appendChild(
+          row(
+            field(
+              "Key",
+              sel(w, "key", [
+                { v: "A", l: "A" },
+                { v: "B", l: "B" },
+                { v: "C", l: "C" },
+                { v: "D", l: "D" },
+              ]),
+            ),
+            field(
+              "Set",
+              sel(w, "val", [
+                { v: "true", l: "ON" },
+                { v: "false", l: "OFF" },
+              ]),
+            ),
+          ),
+        );
+        return () => {
+          c.key = w.key;
+          c.val = w.val === "true";
+        };
+      },
+    },
+    {
+      t: "var",
+      label: "Control Variable",
+      make: () => ({ t: "var", id: 1, op: "set", val: 0, val2: 0 }),
       form(c, box) {
         const w = { id: c.id, op: c.op, val: c.val, val2: c.val2 || 0 };
-        box.appendChild(row(field("Variable", sel(w, "id", varOpts())),
-          field("Op", sel(w, "op", [{ v: "set", l: "Set =" }, { v: "add", l: "Add +" }, { v: "sub", l: "Sub −" }, { v: "rnd", l: "Random" }])),
-          field("Value", nIn(w, "val")), field("…to (random)", nIn(w, "val2"))));
+        box.appendChild(
+          row(
+            field("Variable", sel(w, "id", varOpts())),
+            field(
+              "Op",
+              sel(w, "op", [
+                { v: "set", l: "Set =" },
+                { v: "add", l: "Add +" },
+                { v: "sub", l: "Sub −" },
+                { v: "rnd", l: "Random" },
+              ]),
+            ),
+            field("Value", nIn(w, "val")),
+            field("…to (random)", nIn(w, "val2")),
+          ),
+        );
         return () => Object.assign(c, w);
-      } },
-    { t: "transfer", label: "Transfer Player", make: () => ({ t: "transfer", mapId: 1, x: 0, y: 0, dir: 0 }),
+      },
+    },
+    {
+      t: "transfer",
+      label: "Transfer Player",
+      make: () => ({ t: "transfer", mapId: 1, x: 0, y: 0, dir: 0 }),
       form(c, box) {
-        const w = { mapId: c.mapId, x: c.x, y: c.y, dir: c.dir == null ? 0 : c.dir };
+        const w = {
+          mapId: c.mapId,
+          x: c.x,
+          y: c.y,
+          dir: c.dir == null ? 0 : c.dir,
+        };
         const mapSel = sel(w, "mapId", dbOpts(proj.maps));
         const xIn = nIn(w, "x", 0, 200);
         const yIn = nIn(w, "y", 0, 200);
-        box.appendChild(row(field("Map", mapSel), field("X", xIn), field("Y", yIn), field("Facing", sel(w, "dir", DIR_OPTS))));
-        box.appendChild(h("button", { class: "mini", onclick() {
-          openLocationPicker(w.mapId, w.x, w.y, (res) => {
-            w.mapId = res.mapId; w.x = res.x; w.y = res.y;
-            mapSel.value = String(res.mapId); xIn.value = res.x; yIn.value = res.y;
-          });
-        } }, "📍 Pick destination on map…"));
+        box.appendChild(
+          row(
+            field("Map", mapSel),
+            field("X", xIn),
+            field("Y", yIn),
+            field("Facing", sel(w, "dir", DIR_OPTS)),
+          ),
+        );
+        box.appendChild(
+          h(
+            "button",
+            {
+              class: "mini",
+              onclick() {
+                openLocationPicker(w.mapId, w.x, w.y, (res) => {
+                  w.mapId = res.mapId;
+                  w.x = res.x;
+                  w.y = res.y;
+                  mapSel.value = String(res.mapId);
+                  xIn.value = res.x;
+                  yIn.value = res.y;
+                });
+              },
+            },
+            "📍 Pick destination on map…",
+          ),
+        );
         return () => Object.assign(c, w);
-      } },
-    { t: "gold", label: "Change Gold", make: () => ({ t: "gold", op: "add", val: 100 }),
+      },
+    },
+    {
+      t: "gold",
+      label: "Change Gold",
+      make: () => ({ t: "gold", op: "add", val: 100 }),
       form(c, box) {
         const w = { op: c.op, val: c.val };
-        box.appendChild(row(field("Op", sel(w, "op", [{ v: "add", l: "Gain" }, { v: "sub", l: "Lose" }])), field("Amount", nIn(w, "val", 0))));
+        box.appendChild(
+          row(
+            field(
+              "Op",
+              sel(w, "op", [
+                { v: "add", l: "Gain" },
+                { v: "sub", l: "Lose" },
+              ]),
+            ),
+            field("Amount", nIn(w, "val", 0)),
+          ),
+        );
         return () => Object.assign(c, w);
-      } },
-    { t: "item", label: "Change Items", make: () => ({ t: "item", kind: "item", id: 1, op: "add", val: 1 }),
+      },
+    },
+    {
+      t: "item",
+      label: "Change Items",
+      make: () => ({ t: "item", kind: "item", id: 1, op: "add", val: 1 }),
       form(c, box) {
         const w = { kind: c.kind || "item", id: c.id, op: c.op, val: c.val };
         const entryWrap = h("span");
         function redraw() {
-          const arr = w.kind === "weapon" ? proj.weapons : w.kind === "armor" ? proj.armors : proj.items;
+          const arr =
+            w.kind === "weapon"
+              ? proj.weapons
+              : w.kind === "armor"
+                ? proj.armors
+                : proj.items;
           entryWrap.innerHTML = "";
           entryWrap.appendChild(sel(w, "id", dbOpts(arr)));
         }
-        box.appendChild(row(field("Kind", sel(w, "kind", [{ v: "item", l: "Item" }, { v: "weapon", l: "Weapon" }, { v: "armor", l: "Armor" }], redraw)),
-          field("Entry", entryWrap),
-          field("Op", sel(w, "op", [{ v: "add", l: "Gain" }, { v: "sub", l: "Lose" }])), field("Count", nIn(w, "val", 1, 99))));
+        box.appendChild(
+          row(
+            field(
+              "Kind",
+              sel(
+                w,
+                "kind",
+                [
+                  { v: "item", l: "Item" },
+                  { v: "weapon", l: "Weapon" },
+                  { v: "armor", l: "Armor" },
+                ],
+                redraw,
+              ),
+            ),
+            field("Entry", entryWrap),
+            field(
+              "Op",
+              sel(w, "op", [
+                { v: "add", l: "Gain" },
+                { v: "sub", l: "Lose" },
+              ]),
+            ),
+            field("Count", nIn(w, "val", 1, 99)),
+          ),
+        );
         redraw();
         return () => Object.assign(c, w);
-      } },
-    { t: "party", label: "Change Party", make: () => ({ t: "party", op: "add", actorId: 1 }),
+      },
+    },
+    {
+      t: "party",
+      label: "Change Party",
+      make: () => ({ t: "party", op: "add", actorId: 1 }),
       form(c, box) {
         const w = { op: c.op, actorId: c.actorId };
-        box.appendChild(row(field("Op", sel(w, "op", [{ v: "add", l: "Add" }, { v: "remove", l: "Remove" }])),
-          field("Actor", sel(w, "actorId", dbOpts(proj.actors)))));
+        box.appendChild(
+          row(
+            field(
+              "Op",
+              sel(w, "op", [
+                { v: "add", l: "Add" },
+                { v: "remove", l: "Remove" },
+              ]),
+            ),
+            field("Actor", sel(w, "actorId", dbOpts(proj.actors))),
+          ),
+        );
         return () => Object.assign(c, w);
-      } },
-    { t: "heal", label: "Heal Party", make: () => ({ t: "heal", full: true, hp: 0, mp: 0 }),
+      },
+    },
+    {
+      t: "heal",
+      label: "Heal Party",
+      make: () => ({ t: "heal", full: true, hp: 0, mp: 0 }),
       form(c, box) {
         const w = { full: !!c.full, hp: c.hp || 0, mp: c.mp || 0 };
-        box.appendChild(row(field("Full recovery", chk(w, "full")), field("…or HP", nIn(w, "hp", 0)), field("MP", nIn(w, "mp", 0))));
+        box.appendChild(
+          row(
+            field("Full recovery", chk(w, "full")),
+            field("…or HP", nIn(w, "hp", 0)),
+            field("MP", nIn(w, "mp", 0)),
+          ),
+        );
         return () => Object.assign(c, w);
-      } },
-    { t: "battle", label: "Start Battle", make: () => ({ t: "battle", troopId: 1, escape: true, lose: false }),
+      },
+    },
+    {
+      t: "battle",
+      label: "Start Battle",
+      make: () => ({ t: "battle", troopId: 1, escape: true, lose: false }),
       form(c, box) {
-        const w = { troopId: c.troopId, escape: c.escape !== false, lose: !!c.lose };
-        box.appendChild(row(field("Troop", sel(w, "troopId", dbOpts(proj.troops))),
-          field("Can escape", chk(w, "escape")), field("Continue on loss", chk(w, "lose"))));
-        return () => { c.troopId = w.troopId; c.escape = w.escape; c.lose = w.lose; };
-      } },
-    { t: "shop", label: "Open Shop", make: () => ({ t: "shop", goods: [] }),
+        const w = {
+          troopId: c.troopId,
+          escape: c.escape !== false,
+          lose: !!c.lose,
+        };
+        box.appendChild(
+          row(
+            field("Troop", sel(w, "troopId", dbOpts(proj.troops))),
+            field("Can escape", chk(w, "escape")),
+            field("Continue on loss", chk(w, "lose")),
+          ),
+        );
+        return () => {
+          c.troopId = w.troopId;
+          c.escape = w.escape;
+          c.lose = w.lose;
+        };
+      },
+    },
+    {
+      t: "shop",
+      label: "Open Shop",
+      make: () => ({ t: "shop", goods: [] }),
       form(c, box) {
         const goods = RA.clone(c.goods || []);
         const list = h("div", { class: "minilist" });
         function redraw() {
           list.innerHTML = "";
           goods.forEach((gd, i) => {
-            const arr = gd.kind === "weapon" ? proj.weapons : gd.kind === "armor" ? proj.armors : proj.items;
+            const arr =
+              gd.kind === "weapon"
+                ? proj.weapons
+                : gd.kind === "armor"
+                  ? proj.armors
+                  : proj.items;
             const e = RA.byId(arr, gd.id);
-            list.appendChild(h("div", { class: "minirow" },
-              h("span", null, gd.kind + ": " + (e ? e.name : "?")),
-              h("button", { class: "mini", onclick() { goods.splice(i, 1); redraw(); } }, "✕")));
+            list.appendChild(
+              h(
+                "div",
+                { class: "minirow" },
+                h("span", null, gd.kind + ": " + (e ? e.name : "?")),
+                h(
+                  "button",
+                  {
+                    class: "mini",
+                    onclick() {
+                      goods.splice(i, 1);
+                      redraw();
+                    },
+                  },
+                  "✕",
+                ),
+              ),
+            );
           });
-          const pick = { kind: "item", id: proj.items.length ? proj.items[0].id : 0 };
+          const pick = {
+            kind: "item",
+            id: proj.items.length ? proj.items[0].id : 0,
+          };
           const entry = h("span");
           function redrawEntry() {
-            const arr = pick.kind === "weapon" ? proj.weapons : pick.kind === "armor" ? proj.armors : proj.items;
+            const arr =
+              pick.kind === "weapon"
+                ? proj.weapons
+                : pick.kind === "armor"
+                  ? proj.armors
+                  : proj.items;
             pick.id = arr.length ? arr[0].id : 0;
             entry.innerHTML = "";
             entry.appendChild(sel(pick, "id", dbOpts(arr)));
           }
           redrawEntry();
-          list.appendChild(h("div", { class: "minirow" },
-            sel(pick, "kind", [{ v: "item", l: "Item" }, { v: "weapon", l: "Weapon" }, { v: "armor", l: "Armor" }], redrawEntry),
-            entry,
-            h("button", { class: "mini", onclick() { if (pick.id) { goods.push({ kind: pick.kind, id: pick.id }); redraw(); } } }, "+ add")));
+          list.appendChild(
+            h(
+              "div",
+              { class: "minirow" },
+              sel(
+                pick,
+                "kind",
+                [
+                  { v: "item", l: "Item" },
+                  { v: "weapon", l: "Weapon" },
+                  { v: "armor", l: "Armor" },
+                ],
+                redrawEntry,
+              ),
+              entry,
+              h(
+                "button",
+                {
+                  class: "mini",
+                  onclick() {
+                    if (pick.id) {
+                      goods.push({ kind: pick.kind, id: pick.id });
+                      redraw();
+                    }
+                  },
+                },
+                "+ add",
+              ),
+            ),
+          );
         }
         redraw();
-        box.appendChild(h("div", { class: "fld" }, h("span", null, "Goods"), list));
-        return () => { c.goods = goods; };
-      } },
-    { t: "wait", label: "Wait", make: () => ({ t: "wait", frames: 60 }),
+        box.appendChild(
+          h("div", { class: "fld" }, h("span", null, "Goods"), list),
+        );
+        return () => {
+          c.goods = goods;
+        };
+      },
+    },
+    {
+      t: "wait",
+      label: "Wait",
+      make: () => ({ t: "wait", frames: 60 }),
       form(c, box) {
         const w = { frames: c.frames };
-        box.appendChild(field("Frames (60 = 1 second)", nIn(w, "frames", 1, 6000)));
+        box.appendChild(
+          field("Frames (60 = 1 second)", nIn(w, "frames", 1, 6000)),
+        );
         return () => Object.assign(c, w);
-      } },
-    { t: "se", label: "Play Sound", make: () => ({ t: "se", name: "ok" }),
+      },
+    },
+    {
+      t: "se",
+      label: "Play Sound",
+      make: () => ({ t: "se", name: "ok" }),
       form(c, box) {
         const w = { name: c.name };
-        const s = sel(w, "name", SE_NAMES.map((n) => ({ v: n, l: n })));
+        const s = sel(
+          w,
+          "name",
+          SE_NAMES.map((n) => ({ v: n, l: n })),
+        );
         s.options[0].parentNode.stringValues = true;
-        box.appendChild(row(field("Sound", s), h("button", { class: "mini", onclick() { Sfx.play(w.name); } }, "▶ test")));
-        return () => { c.name = w.name; };
-      } },
-    { t: "music", label: "Change Music", make: () => ({ t: "music", theme: "field" }),
+        box.appendChild(
+          row(
+            field("Sound", s),
+            h(
+              "button",
+              {
+                class: "mini",
+                onclick() {
+                  Sfx.play(w.name);
+                },
+              },
+              "▶ test",
+            ),
+          ),
+        );
+        return () => {
+          c.name = w.name;
+        };
+      },
+    },
+    {
+      t: "music",
+      label: "Change Music",
+      make: () => ({ t: "music", theme: "field" }),
       form(c, box) {
         const w = { theme: c.theme };
         box.appendChild(field("Theme", sel(w, "theme", MUSIC_OPTS())));
-        return () => { c.theme = w.theme; };
-      } },
-    { t: "move", label: "Set Move Route", make: () => ({ t: "move", target: "this", steps: [], wait: true }),
+        return () => {
+          c.theme = w.theme;
+        };
+      },
+    },
+    {
+      t: "move",
+      label: "Set Move Route",
+      make: () => ({ t: "move", target: "this", steps: [], wait: true }),
       form(c, box) {
         const w = { target: c.target, wait: !!c.wait };
         const steps = c.steps.slice();
         const chipBox = h("div", { class: "minilist" });
-        const STEPS = ["up", "down", "left", "right", "forward", "turn_up", "turn_down", "turn_left", "turn_right", "wait15", "wait60"];
+        const STEPS = [
+          "up",
+          "down",
+          "left",
+          "right",
+          "forward",
+          "turn_up",
+          "turn_down",
+          "turn_left",
+          "turn_right",
+          "wait15",
+          "wait60",
+        ];
         function redraw() {
           chipBox.innerHTML = "";
-          steps.forEach((s, i) => chipBox.appendChild(h("span", { class: "chip", onclick() { steps.splice(i, 1); redraw(); }, title: "click to remove" }, s)));
+          steps.forEach((s, i) =>
+            chipBox.appendChild(
+              h(
+                "span",
+                {
+                  class: "chip",
+                  onclick() {
+                    steps.splice(i, 1);
+                    redraw();
+                  },
+                  title: "click to remove",
+                },
+                s,
+              ),
+            ),
+          );
           const pick = { s: "up" };
-          const selEl = sel(pick, "s", STEPS.map((s) => ({ v: s, l: s })));
-          chipBox.appendChild(h("div", { class: "minirow" }, selEl,
-            h("button", { class: "mini", onclick() { steps.push(pick.s); redraw(); } }, "+ add")));
+          const selEl = sel(
+            pick,
+            "s",
+            STEPS.map((s) => ({ v: s, l: s })),
+          );
+          chipBox.appendChild(
+            h(
+              "div",
+              { class: "minirow" },
+              selEl,
+              h(
+                "button",
+                {
+                  class: "mini",
+                  onclick() {
+                    steps.push(pick.s);
+                    redraw();
+                  },
+                },
+                "+ add",
+              ),
+            ),
+          );
         }
         redraw();
-        box.appendChild(row(field("Target", sel(w, "target", [{ v: "this", l: "This Event" }, { v: "player", l: "Player" }])),
-          field("Wait for finish", chk(w, "wait"))));
-        box.appendChild(h("div", { class: "fld" }, h("span", null, "Steps (click a chip to remove)"), chipBox));
-        return () => { c.target = w.target; c.wait = w.wait; c.steps = steps; };
-      } },
-    { t: "cameraZoom", label: "Camera Zoom", make: () => ({ t: "cameraZoom", zoom: 1, frames: 30 }),
+        box.appendChild(
+          row(
+            field(
+              "Target",
+              sel(w, "target", [
+                { v: "this", l: "This Event" },
+                { v: "player", l: "Player" },
+              ]),
+            ),
+            field("Wait for finish", chk(w, "wait")),
+          ),
+        );
+        box.appendChild(
+          h(
+            "div",
+            { class: "fld" },
+            h("span", null, "Steps (click a chip to remove)"),
+            chipBox,
+          ),
+        );
+        return () => {
+          c.target = w.target;
+          c.wait = w.wait;
+          c.steps = steps;
+        };
+      },
+    },
+    {
+      t: "cameraZoom",
+      label: "Camera Zoom",
+      make: () => ({ t: "cameraZoom", zoom: 1, frames: 30 }),
       form(c, box) {
         const w = { zoom: c.zoom == null ? 1 : c.zoom, frames: c.frames || 0 };
-        box.appendChild(row(
-          field("Zoom (0.25 = out, 1 = normal, 4 = in)", nIn(w, "zoom", 0.25, 4, 0.05)),
-          field("Duration (frames)", nIn(w, "frames", 0, 6000)),
-        ));
-        box.appendChild(h("div", { class: "dim" }, "The camera stays centered on the player. Use 1.0 to return to the normal view."));
-        return () => { c.zoom = Math.max(0.25, Math.min(4, w.zoom || 1)); c.frames = Math.max(0, Math.floor(w.frames || 0)); };
-      } },
-    { t: "transparency", label: "Change Transparency", make: () => ({ t: "transparency", val: true }),
+        box.appendChild(
+          row(
+            field(
+              "Zoom (0.25 = out, 1 = normal, 4 = in)",
+              nIn(w, "zoom", 0.25, 4, 0.05),
+            ),
+            field("Duration (frames)", nIn(w, "frames", 0, 6000)),
+          ),
+        );
+        box.appendChild(
+          h(
+            "div",
+            { class: "dim" },
+            "The camera stays centered on the player. Use 1.0 to return to the normal view.",
+          ),
+        );
+        return () => {
+          c.zoom = Math.max(0.25, Math.min(4, w.zoom || 1));
+          c.frames = Math.max(0, Math.floor(w.frames || 0));
+        };
+      },
+    },
+    {
+      t: "transparency",
+      label: "Change Transparency",
+      make: () => ({ t: "transparency", val: true }),
       form(c, box) {
         const w = { val: String(c.val !== false) };
-        box.appendChild(field("Player becomes", sel(w, "val", [{ v: "true", l: "Transparent (hidden)" }, { v: "false", l: "Visible" }])));
-        box.appendChild(h("div", { class: "dim" }, "A transparent player still moves and triggers events — only the sprite is hidden. Pair with “Start transparent” in Database ▸ System for cutscene intros."));
-        return () => { c.val = w.val === "true"; };
-      } },
-    { t: "shake", label: "Shake Screen", make: () => ({ t: "shake", power: 5, speed: 5, duration: 30, wait: true }),
+        box.appendChild(
+          field(
+            "Player becomes",
+            sel(w, "val", [
+              { v: "true", l: "Transparent (hidden)" },
+              { v: "false", l: "Visible" },
+            ]),
+          ),
+        );
+        box.appendChild(
+          h(
+            "div",
+            { class: "dim" },
+            "A transparent player still moves and triggers events — only the sprite is hidden. Pair with “Start transparent” in Database ▸ System for cutscene intros.",
+          ),
+        );
+        return () => {
+          c.val = w.val === "true";
+        };
+      },
+    },
+    {
+      t: "shake",
+      label: "Shake Screen",
+      make: () => ({
+        t: "shake",
+        power: 5,
+        speed: 5,
+        duration: 30,
+        wait: true,
+      }),
       form(c, box) {
-        const w = { power: c.power || 5, speed: c.speed || 5, duration: c.duration || 30, wait: c.wait !== false };
-        box.appendChild(row(
-          field("Power (1-9)", nIn(w, "power", 1, 9)),
-          field("Speed (1-9)", nIn(w, "speed", 1, 9)),
-          field("Duration (frames)", nIn(w, "duration", 1, 600)),
-          field("Wait for completion", chk(w, "wait"))
-        ));
+        const w = {
+          power: c.power || 5,
+          speed: c.speed || 5,
+          duration: c.duration || 30,
+          wait: c.wait !== false,
+        };
+        box.appendChild(
+          row(
+            field("Power (1-9)", nIn(w, "power", 1, 9)),
+            field("Speed (1-9)", nIn(w, "speed", 1, 9)),
+            field("Duration (frames)", nIn(w, "duration", 1, 600)),
+            field("Wait for completion", chk(w, "wait")),
+          ),
+        );
         return () => {
           c.power = Number(w.power);
           c.speed = Number(w.speed);
           c.duration = Number(w.duration);
           c.wait = w.wait;
         };
-      } },
-    { t: "weather", label: "Change Weather", make: () => ({ t: "weather", kind: "none", power: 5 }),
+      },
+    },
+    {
+      t: "weather",
+      label: "Change Weather",
+      make: () => ({ t: "weather", kind: "none", power: 5 }),
       form(c, box) {
         const w = { kind: c.kind || "none", power: c.power || 5 };
-        box.appendChild(row(
-          field("Type", sel(w, "kind", [
-            { v: "none", l: "None (clear)" },
-            { v: "rain", l: "Rain" },
-            { v: "storm", l: "Storm" },
-            { v: "snow", l: "Snow" },
-            { v: "fog", l: "Fog" }
-          ])),
-          field("Power (1-9)", nIn(w, "power", 1, 9))
-        ));
+        box.appendChild(
+          row(
+            field(
+              "Type",
+              sel(w, "kind", [
+                { v: "none", l: "None (clear)" },
+                { v: "rain", l: "Rain" },
+                { v: "storm", l: "Storm" },
+                { v: "snow", l: "Snow" },
+                { v: "fog", l: "Fog" },
+              ]),
+            ),
+            field("Power (1-9)", nIn(w, "power", 1, 9)),
+          ),
+        );
         return () => {
           c.kind = w.kind;
           c.power = Number(w.power);
         };
-      } },
-    { t: "flash", label: "Flash Screen", make: () => ({ t: "flash", color: "#ffffff", opacity: 0.5, duration: 15, wait: false }),
+      },
+    },
+    {
+      t: "flash",
+      label: "Flash Screen",
+      make: () => ({
+        t: "flash",
+        color: "#ffffff",
+        opacity: 0.5,
+        duration: 15,
+        wait: false,
+      }),
       form(c, box) {
-        const w = { color: c.color || "#ffffff", opacity: c.opacity || 0.5, duration: c.duration || 15, wait: !!c.wait };
-        const colorIn = h("input", { type: "color", value: w.color, oninput(e) { w.color = e.target.value; } });
-        box.appendChild(row(
-          field("Color", colorIn),
-          field("Opacity (0.1-1.0)", nIn(w, "opacity", 0.1, 1.0, 0.1)),
-          field("Duration (frames)", nIn(w, "duration", 1, 300)),
-          field("Wait for completion", chk(w, "wait"))
-        ));
+        const w = {
+          color: c.color || "#ffffff",
+          opacity: c.opacity || 0.5,
+          duration: c.duration || 15,
+          wait: !!c.wait,
+        };
+        const colorIn = h("input", {
+          type: "color",
+          value: w.color,
+          oninput(e) {
+            w.color = e.target.value;
+          },
+        });
+        box.appendChild(
+          row(
+            field("Color", colorIn),
+            field("Opacity (0.1-1.0)", nIn(w, "opacity", 0.1, 1.0, 0.1)),
+            field("Duration (frames)", nIn(w, "duration", 1, 300)),
+            field("Wait for completion", chk(w, "wait")),
+          ),
+        );
         return () => {
           c.color = w.color;
           c.opacity = Number(w.opacity);
           c.duration = Number(w.duration);
           c.wait = w.wait;
         };
-      } },
-    { t: "erase", label: "Erase This Event", make: () => ({ t: "erase" }), form: () => () => {} },
-    { t: "save", label: "Open Save Screen", make: () => ({ t: "save" }), form: () => () => {} },
-    { t: "gameover", label: "Game Over", make: () => ({ t: "gameover" }), form: () => () => {} },
-    { t: "totitle", label: "Return to Title", make: () => ({ t: "totitle" }), form: () => () => {} },
-    { t: "script", label: "Script (JavaScript)", make: () => ({ t: "script", code: "" }),
+      },
+    },
+    {
+      t: "erase",
+      label: "Erase This Event",
+      make: () => ({ t: "erase" }),
+      form: () => () => {},
+    },
+    {
+      t: "save",
+      label: "Open Save Screen",
+      make: () => ({ t: "save" }),
+      form: () => () => {},
+    },
+    {
+      t: "gameover",
+      label: "Game Over",
+      make: () => ({ t: "gameover" }),
+      form: () => () => {},
+    },
+    {
+      t: "totitle",
+      label: "Return to Title",
+      make: () => ({ t: "totitle" }),
+      form: () => () => {},
+    },
+    {
+      t: "script",
+      label: "Script (JavaScript)",
+      make: () => ({ t: "script", code: "" }),
       form(c, box) {
-        const ta = h("textarea", { rows: 6, spellcheck: "false" }, c.code || "");
-        box.appendChild(field("JS — api: game.setSwitch(id,v) getSwitch setVar getVar addGold(n) party() quest(id) questStatus startQuest advanceQuestObjective setQuestObjective completeQuest failQuest abandonQuest state()", ta));
-        return () => { c.code = ta.value; };
-      } },
+        const ta = h(
+          "textarea",
+          { rows: 6, spellcheck: "false" },
+          c.code || "",
+        );
+        box.appendChild(
+          field(
+            "JS — api: game.setSwitch(id,v) getSwitch setVar getVar addGold(n) party() quest(id) questStatus startQuest advanceQuestObjective setQuestObjective completeQuest failQuest abandonQuest state()",
+            ta,
+          ),
+        );
+        return () => {
+          c.code = ta.value;
+        };
+      },
+    },
   ];
   const cmdDef = (t) => CMD_DEFS.find((d) => d.t === t);
 
@@ -3147,8 +5179,24 @@ const editorI18n = await createEditorI18n({
       title: def.label,
       content: box,
       buttons: [
-        { label: "OK", primary: true, onClick(close) { if (!skipSnapshot && snapFn) snapFn(); apply(); close(); touch(); onDone(); } },
-        { label: "Cancel", onClick(close) { close(); onDone(); } },
+        {
+          label: "OK",
+          primary: true,
+          onClick(close) {
+            if (!skipSnapshot && snapFn) snapFn();
+            apply();
+            close();
+            touch();
+            onDone();
+          },
+        },
+        {
+          label: "Cancel",
+          onClick(close) {
+            close();
+            onDone();
+          },
+        },
       ],
       dismissable: false,
     });
@@ -3157,48 +5205,92 @@ const editorI18n = await createEditorI18n({
     const PAGE_SIZE = 24;
     const tabs = h("div", { class: "cmdtabs" });
     const grid = h("div", { class: "cmdgrid" });
-    const m = modal({ title: "Add Command", content: h("div", null, tabs, grid), buttons: [{ label: "Cancel" }] });
+    const m = modal({
+      title: "Add Command",
+      content: h("div", null, tabs, grid),
+      buttons: [{ label: "Cancel" }],
+    });
     let page = 0;
 
     function editPreset(preset) {
-      const draft = { name: preset ? preset.name : "", code: preset ? preset.code : "" };
+      const draft = {
+        name: preset ? preset.name : "",
+        code: preset ? preset.code : "",
+      };
       const nameInput = tIn(draft, "name");
-      const codeInput = h("textarea", { rows: 8, spellcheck: "false" }, draft.code);
+      const codeInput = h(
+        "textarea",
+        { rows: 8, spellcheck: "false" },
+        draft.code,
+      );
       const buttons = [
-        { label: "Save", primary: true, onClick(close) {
-          const name = nameInput.value.trim();
-          if (!name) { nameInput.focus(); return; }
-          draft.name = name;
-          draft.code = codeInput.value;
-          if (preset) Object.assign(preset, draft);
-          else {
-            proj.commandPresets.push({
-              id: RA.nextId(proj.commandPresets),
-              name: draft.name,
-              code: draft.code,
-            });
-          }
-          touch();
-          close();
-          page = Math.max(0, Math.ceil((CMD_DEFS.length + proj.commandPresets.length + 1) / PAGE_SIZE) - 1);
-          redraw();
-        } },
+        {
+          label: "Save",
+          primary: true,
+          onClick(close) {
+            const name = nameInput.value.trim();
+            if (!name) {
+              nameInput.focus();
+              return;
+            }
+            draft.name = name;
+            draft.code = codeInput.value;
+            if (preset) Object.assign(preset, draft);
+            else {
+              proj.commandPresets.push({
+                id: RA.nextId(proj.commandPresets),
+                name: draft.name,
+                code: draft.code,
+              });
+            }
+            touch();
+            close();
+            page = Math.max(
+              0,
+              Math.ceil(
+                (CMD_DEFS.length + proj.commandPresets.length + 1) / PAGE_SIZE,
+              ) - 1,
+            );
+            redraw();
+          },
+        },
         { label: "Cancel" },
       ];
-      if (preset) buttons.unshift({ label: "Delete", onClick(close) {
-        confirmBox("Delete the saved command button \"" + preset.name + "\"?", () => {
-          proj.commandPresets = proj.commandPresets.filter((p) => p.id !== preset.id);
-          touch();
-          close();
-          redraw();
+      if (preset)
+        buttons.unshift({
+          label: "Delete",
+          onClick(close) {
+            confirmBox(
+              'Delete the saved command button "' + preset.name + '"?',
+              () => {
+                proj.commandPresets = proj.commandPresets.filter(
+                  (p) => p.id !== preset.id,
+                );
+                touch();
+                close();
+                redraw();
+              },
+            );
+          },
         });
-      } });
       modal({
         title: preset ? "Edit Command Button" : "Add Command Button",
-        content: h("div", null,
+        content: h(
+          "div",
+          null,
           field("Button name", nameInput),
-          field("JavaScript (runs as an event Script command; API is available as game)", codeInput),
-          preset ? h("div", { class: "dim" }, "Saved command buttons are stored with this project.") : null),
+          field(
+            "JavaScript (runs as an event Script command; API is available as game)",
+            codeInput,
+          ),
+          preset
+            ? h(
+                "div",
+                { class: "dim" },
+                "Saved command buttons are stored with this project.",
+              )
+            : null,
+        ),
         buttons,
         dismissable: false,
       });
@@ -3206,7 +5298,9 @@ const editorI18n = await createEditorI18n({
 
     function items() {
       return CMD_DEFS.map((def) => ({ kind: "builtin", def }))
-        .concat(proj.commandPresets.map((preset) => ({ kind: "preset", preset })))
+        .concat(
+          proj.commandPresets.map((preset) => ({ kind: "preset", preset })),
+        )
         .concat({ kind: "add" });
     }
     function redraw() {
@@ -3215,24 +5309,67 @@ const editorI18n = await createEditorI18n({
       page = Math.max(0, Math.min(page, pages - 1));
       tabs.innerHTML = "";
       for (let i = 0; i < pages; i++) {
-        tabs.appendChild(h("button", {
-          class: "mini" + (i === page ? " sel" : ""),
-          onclick() { page = i; redraw(); },
-        }, "Page " + (i + 1)));
+        tabs.appendChild(
+          h(
+            "button",
+            {
+              class: "mini" + (i === page ? " sel" : ""),
+              onclick() {
+                page = i;
+                redraw();
+              },
+            },
+            "Page " + (i + 1),
+          ),
+        );
       }
       grid.innerHTML = "";
       all.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).forEach((item) => {
         if (item.kind === "builtin") {
-          grid.appendChild(h("button", { onclick() { m.close(); onPicked(item.def.make()); } }, item.def.label));
+          grid.appendChild(
+            h(
+              "button",
+              {
+                onclick() {
+                  m.close();
+                  onPicked(item.def.make());
+                },
+              },
+              item.def.label,
+            ),
+          );
         } else if (item.kind === "preset") {
-          grid.appendChild(h("button", {
-            class: "cmdpreset",
-            title: "Insert saved script. Right-click to edit or delete.",
-            onclick() { m.close(); onPicked({ t: "script", code: item.preset.code || "" }); },
-            oncontextmenu(e) { e.preventDefault(); editPreset(item.preset); },
-          }, item.preset.name));
+          grid.appendChild(
+            h(
+              "button",
+              {
+                class: "cmdpreset",
+                title: "Insert saved script. Right-click to edit or delete.",
+                onclick() {
+                  m.close();
+                  onPicked({ t: "script", code: item.preset.code || "" });
+                },
+                oncontextmenu(e) {
+                  e.preventDefault();
+                  editPreset(item.preset);
+                },
+              },
+              item.preset.name,
+            ),
+          );
         } else {
-          grid.appendChild(h("button", { class: "cmdaddnew", onclick() { editPreset(null); } }, "+Add New"));
+          grid.appendChild(
+            h(
+              "button",
+              {
+                class: "cmdaddnew",
+                onclick() {
+                  editPreset(null);
+                },
+              },
+              "+Add New",
+            ),
+          );
         }
       });
     }
@@ -3246,15 +5383,30 @@ const editorI18n = await createEditorI18n({
       if (c.t === "if") {
         out.push({ label: "▸ Then", depth: depth });
         buildCmdRows(c.then, depth + 1, out);
-        out.push({ arr: c.then, idx: c.then.length, depth: depth + 1, slot: true });
+        out.push({
+          arr: c.then,
+          idx: c.then.length,
+          depth: depth + 1,
+          slot: true,
+        });
         out.push({ label: "▸ Else", depth: depth });
         buildCmdRows(c.else, depth + 1, out);
-        out.push({ arr: c.else, idx: c.else.length, depth: depth + 1, slot: true });
+        out.push({
+          arr: c.else,
+          idx: c.else.length,
+          depth: depth + 1,
+          slot: true,
+        });
       } else if (c.t === "choices") {
         c.options.forEach((o, bi) => {
           out.push({ label: "▸ When [" + o + "]", depth });
           buildCmdRows(c.branches[bi], depth + 1, out);
-          out.push({ arr: c.branches[bi], idx: c.branches[bi].length, depth: depth + 1, slot: true });
+          out.push({
+            arr: c.branches[bi],
+            idx: c.branches[bi].length,
+            depth: depth + 1,
+            slot: true,
+          });
         });
       }
     });
@@ -3262,18 +5414,31 @@ const editorI18n = await createEditorI18n({
   function cmdListWidget(getList, undoApi) {
     const wrap = h("div", { class: "cmdlist-wrap" });
     const listEl = h("div", { class: "cmdlist", tabindex: "0" });
-    const snap = undoApi.snapshot;             // snapshot before a mutation
-    let selRow = null, anchorRow = null, rows = [], dragFromIdx = null, cmdMenuEl = null;
-    let dragBlock = null, dragFromArr = null, dragFrom = 0, dragCount = 0;
+    const snap = undoApi.snapshot; // snapshot before a mutation
+    let selRow = null,
+      anchorRow = null,
+      rows = [],
+      dragFromIdx = null,
+      cmdMenuEl = null;
+    let dragBlock = null,
+      dragFromArr = null,
+      dragFrom = 0,
+      dragCount = 0;
     function clearDropMarks() {
-      listEl.querySelectorAll(".drop-before, .drop-after").forEach((d) => d.classList.remove("drop-before", "drop-after"));
+      listEl
+        .querySelectorAll(".drop-before, .drop-after")
+        .forEach((d) => d.classList.remove("drop-before", "drop-after"));
     }
     // True when `arr` is one of cmd's own branch arrays, or nested inside one —
     // so a container command (if/choices) is never dropped into its own subtree.
     function ownsArray(cmd, arr) {
       if (!cmd) return false;
-      const branches = cmd.t === "if" ? [cmd.then, cmd.else]
-        : cmd.t === "choices" ? (cmd.branches || []) : [];
+      const branches =
+        cmd.t === "if"
+          ? [cmd.then, cmd.else]
+          : cmd.t === "choices"
+            ? cmd.branches || []
+            : [];
       for (const b of branches) {
         if (b === arr) return true;
         for (const c of b) if (ownsArray(c, arr)) return true;
@@ -3285,60 +5450,125 @@ const editorI18n = await createEditorI18n({
     function dropOk(target) {
       if (!dragBlock) return false;
       if (!target.arr || !(target.cmd || target.slot)) return false;
-      if (dragBlock.includes(target.cmd)) return false;            // not onto a member of the dragged block
-      return !dragBlock.some((c) => ownsArray(c, target.arr));     // not into any block member's own subtree
+      if (dragBlock.includes(target.cmd)) return false; // not onto a member of the dragged block
+      return !dragBlock.some((c) => ownsArray(c, target.arr)); // not into any block member's own subtree
     }
     function redraw(reselect) {
       rows = [];
       buildCmdRows(getList(), 0, rows);
-      rows.push({ arr: getList(), idx: getList().length, depth: 0, slot: true });
-      if (reselect) { // re-find the moved/pasted command(s) by identity so the selection follows them
+      rows.push({
+        arr: getList(),
+        idx: getList().length,
+        depth: 0,
+        slot: true,
+      });
+      if (reselect) {
+        // re-find the moved/pasted command(s) by identity so the selection follows them
         const cmds = Array.isArray(reselect) ? reselect : [reselect];
-        let first = -1, last = -1;
-        rows.forEach((r3, i) => { if (r3.cmd && cmds.indexOf(r3.cmd) >= 0) { if (first < 0) first = i; last = i; } });
-        if (first >= 0) { anchorRow = first; selRow = last; } // focus = last → repeated paste/move stacks
+        let first = -1,
+          last = -1;
+        rows.forEach((r3, i) => {
+          if (r3.cmd && cmds.indexOf(r3.cmd) >= 0) {
+            if (first < 0) first = i;
+            last = i;
+          }
+        });
+        if (first >= 0) {
+          anchorRow = first;
+          selRow = last;
+        } // focus = last → repeated paste/move stacks
       }
       listEl.innerHTML = "";
       const blk = selBlock(); // the contiguous multi-selection (or the single focused command)
       rows.forEach((r2, i) => {
-        const inBlk = blk && r2.cmd && r2.arr === blk.arr && r2.idx >= blk.lo && r2.idx <= blk.hi;
-        const div = h("div", {
-          class: "cmdrow" + (r2.label ? " branch" : "") + (r2.slot ? " slot" : "")
-            + (i === selRow ? " sel" : (inBlk ? " cmd-selected" : "")),
-          style: "padding-left:" + (8 + r2.depth * 18) + "px",
-          onclick(e) {
-            if (e.shiftKey && anchorRow != null && rows[anchorRow] && r2.cmd && r2.arr === rows[anchorRow].arr)
-              selRow = i;                    // extend the range within one sibling list
-            else anchorRow = selRow = i;     // plain click / re-anchor (foreign branch, label, slot, ctrl)
-            redraw(); listEl.focus({ preventScroll: true });
+        const inBlk =
+          blk &&
+          r2.cmd &&
+          r2.arr === blk.arr &&
+          r2.idx >= blk.lo &&
+          r2.idx <= blk.hi;
+        const div = h(
+          "div",
+          {
+            class:
+              "cmdrow" +
+              (r2.label ? " branch" : "") +
+              (r2.slot ? " slot" : "") +
+              (i === selRow ? " sel" : inBlk ? " cmd-selected" : ""),
+            style: "padding-left:" + (8 + r2.depth * 18) + "px",
+            onclick(e) {
+              if (
+                e.shiftKey &&
+                anchorRow != null &&
+                rows[anchorRow] &&
+                r2.cmd &&
+                r2.arr === rows[anchorRow].arr
+              )
+                selRow = i; // extend the range within one sibling list
+              else anchorRow = selRow = i; // plain click / re-anchor (foreign branch, label, slot, ctrl)
+              redraw();
+              listEl.focus({ preventScroll: true });
+            },
+            ondblclick() {
+              anchorRow = selRow = i;
+              if (r2.slot) addAt(r2);
+              else if (r2.cmd) editAt(r2);
+            },
+            oncontextmenu(e) {
+              openCmdMenu(e, i);
+            },
           },
-          ondblclick() { anchorRow = selRow = i; if (r2.slot) addAt(r2); else if (r2.cmd) editAt(r2); },
-          oncontextmenu(e) { openCmdMenu(e, i); },
-        }, r2.label ? r2.label : r2.slot ? "◇ …" : "◆ " + cmdSummary(r2.cmd));
+          r2.label ? r2.label : r2.slot ? "◇ …" : "◆ " + cmdSummary(r2.cmd),
+        );
         if (r2.cmd) {
           div.draggable = true;
           div.addEventListener("dragstart", (e) => {
             const b = selBlock();
-            const inB = b && r2.arr === b.arr && r2.idx >= b.lo && r2.idx <= b.hi;
-            if (inB) { dragBlock = b.cmds; dragFromArr = b.arr; dragFrom = b.lo; dragCount = b.count; }
-            else { anchorRow = selRow = i; dragBlock = [r2.cmd]; dragFromArr = r2.arr; dragFrom = r2.idx; dragCount = 1; }
+            const inB =
+              b && r2.arr === b.arr && r2.idx >= b.lo && r2.idx <= b.hi;
+            if (inB) {
+              dragBlock = b.cmds;
+              dragFromArr = b.arr;
+              dragFrom = b.lo;
+              dragCount = b.count;
+            } else {
+              anchorRow = selRow = i;
+              dragBlock = [r2.cmd];
+              dragFromArr = r2.arr;
+              dragFrom = r2.idx;
+              dragCount = 1;
+            }
             dragFromIdx = i;
             e.dataTransfer.effectAllowed = "move";
             e.dataTransfer.setData("text/plain", "cmd"); // Firefox needs data to start a drag
             div.classList.add("dragging");
           });
-          div.addEventListener("dragend", () => { div.classList.remove("dragging"); clearDropMarks(); dragFromIdx = null; dragBlock = null; });
+          div.addEventListener("dragend", () => {
+            div.classList.remove("dragging");
+            clearDropMarks();
+            dragFromIdx = null;
+            dragBlock = null;
+          });
         }
         div.addEventListener("dragover", (e) => {
           if (!dropOk(r2)) return;
           e.preventDefault();
           e.dataTransfer.dropEffect = "move";
           clearDropMarks();
-          if (r2.slot) { div.classList.add("drop-before"); return; } // slot = drop at end of level
+          if (r2.slot) {
+            div.classList.add("drop-before");
+            return;
+          } // slot = drop at end of level
           const rect = div.getBoundingClientRect();
-          div.classList.add(e.clientY - rect.top < rect.height / 2 ? "drop-before" : "drop-after");
+          div.classList.add(
+            e.clientY - rect.top < rect.height / 2
+              ? "drop-before"
+              : "drop-after",
+          );
         });
-        div.addEventListener("dragleave", () => div.classList.remove("drop-before", "drop-after"));
+        div.addEventListener("dragleave", () =>
+          div.classList.remove("drop-before", "drop-after"),
+        );
         div.addEventListener("drop", (e) => {
           if (!dropOk(r2)) return;
           e.preventDefault();
@@ -3349,43 +5579,62 @@ const editorI18n = await createEditorI18n({
             to = e.clientY - rect.top < rect.height / 2 ? r2.idx : r2.idx + 1;
           }
           clearDropMarks();
-          if (dragFromArr === toArr && to >= dragFrom && to <= dragFrom + dragCount) { dragBlock = null; dragFromIdx = null; return; } // lands inside itself
+          if (
+            dragFromArr === toArr &&
+            to >= dragFrom &&
+            to <= dragFrom + dragCount
+          ) {
+            dragBlock = null;
+            dragFromIdx = null;
+            return;
+          } // lands inside itself
           snap();
           dragFromArr.splice(dragFrom, dragCount);
           if (dragFromArr === toArr && to > dragFrom) to -= dragCount; // adjust for the gap we just removed
           toArr.splice(to, 0, ...dragBlock);
-          const moved = dragBlock; dragBlock = null; dragFromIdx = null;
-          touch(); redraw(moved); // keep the moved block selected
+          const moved = dragBlock;
+          dragBlock = null;
+          dragFromIdx = null;
+          touch();
+          redraw(moved); // keep the moved block selected
         });
         listEl.appendChild(div);
       });
     }
-    function cur() { return selRow != null ? rows[selRow] : null; }
+    function cur() {
+      return selRow != null ? rows[selRow] : null;
+    }
     // The current selection as a contiguous block within ONE sibling array: the run between
     // anchorRow and the focused row, or just the focused command. Null if nothing usable is selected.
     function selBlock() {
-      const a = rows[anchorRow], f = cur();
+      const a = rows[anchorRow],
+        f = cur();
       if (a && f && a.cmd && f.cmd && a.arr === f.arr) {
-        const arr = a.arr, lo = Math.min(a.idx, f.idx), hi = Math.max(a.idx, f.idx);
+        const arr = a.arr,
+          lo = Math.min(a.idx, f.idx),
+          hi = Math.max(a.idx, f.idx);
         return { arr, lo, hi, count: hi - lo + 1, cmds: arr.slice(lo, hi + 1) };
       }
-      return (f && f.cmd) ? { arr: f.arr, lo: f.idx, hi: f.idx, count: 1, cmds: [f.cmd] } : null;
+      return f && f.cmd
+        ? { arr: f.arr, lo: f.idx, hi: f.idx, count: 1, cmds: [f.cmd] }
+        : null;
     }
     function addAt(r2) {
       let target = r2 || cur();
-      if (!target || (!target.slot && !target.cmd)) target = { arr: getList(), idx: getList().length };
+      if (!target || (!target.slot && !target.cmd))
+        target = { arr: getList(), idx: getList().length };
       pickCommand((nc) => {
         snap();
         target.arr.splice(target.idx, 0, nc);
         touch();
-        editCommand(nc, redraw, true);   // suppress: this snapshot already covers the whole add
+        editCommand(nc, redraw, true); // suppress: this snapshot already covers the whole add
         redraw(nc);
       });
     }
     function editAt(r2) {
       const target = r2 || cur();
       if (!target || !target.cmd) return;
-      editCommand(target.cmd, redraw, false, snap);   // edit path snapshots on OK (before apply)
+      editCommand(target.cmd, redraw, false, snap); // edit path snapshots on OK (before apply)
     }
     function delAt() {
       const b = selBlock();
@@ -3393,7 +5642,9 @@ const editorI18n = await createEditorI18n({
       snap();
       b.arr.splice(b.lo, b.count);
       touch();
-      const survivor = b.arr.length ? b.arr[Math.min(b.lo, b.arr.length - 1)] : null;
+      const survivor = b.arr.length
+        ? b.arr[Math.min(b.lo, b.arr.length - 1)]
+        : null;
       anchorRow = selRow = null;
       redraw(survivor || undefined);
     }
@@ -3412,55 +5663,109 @@ const editorI18n = await createEditorI18n({
       const b = selBlock();
       if (!b) return;
       clipCmd = b.cmds.map((c) => RA.clone(c));
-      flashStatus((cut ? "Cut " : "Copied ") + b.count + (b.count > 1 ? " commands" : " command"));
+      flashStatus(
+        (cut ? "Cut " : "Copied ") +
+          b.count +
+          (b.count > 1 ? " commands" : " command"),
+      );
       if (cut) {
         snap();
         b.arr.splice(b.lo, b.count);
         touch();
-        const survivor = b.arr.length ? b.arr[Math.min(b.lo, b.arr.length - 1)] : null;
+        const survivor = b.arr.length
+          ? b.arr[Math.min(b.lo, b.arr.length - 1)]
+          : null;
         anchorRow = selRow = null;
         redraw(survivor || undefined);
       }
     }
     function pasteSel() {
-      const block = Array.isArray(clipCmd) ? clipCmd : (clipCmd ? [clipCmd] : null);
-      if (!block || !block.length) { flashStatus(t("status.clipboard_empty_command")); return; }
+      const block = Array.isArray(clipCmd)
+        ? clipCmd
+        : clipCmd
+          ? [clipCmd]
+          : null;
+      if (!block || !block.length) {
+        flashStatus(t("status.clipboard_empty_command"));
+        return;
+      }
       const target = cur();
       let arr, idx;
-      if (target && target.cmd) { arr = target.arr; idx = target.idx + 1; }   // after the focused command
-      else if (target && target.slot) { arr = target.arr; idx = target.idx; } // at the insertion slot
-      else { arr = getList(); idx = getList().length; }                       // nothing selected → end of list
+      if (target && target.cmd) {
+        arr = target.arr;
+        idx = target.idx + 1;
+      } // after the focused command
+      else if (target && target.slot) {
+        arr = target.arr;
+        idx = target.idx;
+      } // at the insertion slot
+      else {
+        arr = getList();
+        idx = getList().length;
+      } // nothing selected → end of list
       const clones = block.map((c) => RA.clone(c));
       snap();
       arr.splice(idx, 0, ...clones);
-      touch(); redraw(clones); // select the pasted block so repeated Ctrl+V stacks
+      touch();
+      redraw(clones); // select the pasted block so repeated Ctrl+V stacks
     }
     function closeCmdMenu() {
       if (!cmdMenuEl) return;
-      cmdMenuEl.remove(); cmdMenuEl = null;
+      cmdMenuEl.remove();
+      cmdMenuEl = null;
       document.removeEventListener("mousedown", onCmdMenuOutside, true);
       document.removeEventListener("keydown", onCmdMenuKey, true);
     }
-    function onCmdMenuOutside(ev) { if (cmdMenuEl && !cmdMenuEl.contains(ev.target)) closeCmdMenu(); }
-    function onCmdMenuKey(ev) { if (ev.key === "Escape") { ev.preventDefault(); closeCmdMenu(); } }
+    function onCmdMenuOutside(ev) {
+      if (cmdMenuEl && !cmdMenuEl.contains(ev.target)) closeCmdMenu();
+    }
+    function onCmdMenuKey(ev) {
+      if (ev.key === "Escape") {
+        ev.preventDefault();
+        closeCmdMenu();
+      }
+    }
     // Right-click a command (or insertion slot) for the same actions as the toolbar buttons.
     function openCmdMenu(e, i) {
       e.preventDefault();
       if (!rows[i] || (!rows[i].cmd && !rows[i].slot)) return; // labels: just suppress the native menu
-      const x = e.clientX, y = e.clientY;
+      const x = e.clientX,
+        y = e.clientY;
       const b0 = selBlock(); // keep an existing multi-selection if the right-click lands inside it
-      const inBlk = b0 && rows[i].cmd && rows[i].arr === b0.arr && rows[i].idx >= b0.lo && rows[i].idx <= b0.hi;
+      const inBlk =
+        b0 &&
+        rows[i].cmd &&
+        rows[i].arr === b0.arr &&
+        rows[i].idx >= b0.lo &&
+        rows[i].idx <= b0.hi;
       if (!inBlk) anchorRow = selRow = i;
-      redraw(); listEl.focus({ preventScroll: true });
+      redraw();
+      listEl.focus({ preventScroll: true });
       closeCmdMenu();
-      const b = selBlock(), isCmd = !!b, n = b ? b.count : 0, sfx = n > 1 ? " " + n : "";
+      const b = selBlock(),
+        isCmd = !!b,
+        n = b ? b.count : 0,
+        sfx = n > 1 ? " " + n : "";
       const canPaste = Array.isArray(clipCmd) ? clipCmd.length > 0 : !!clipCmd;
-      const canUp = !!b && b.lo > 0, canDown = !!b && b.hi < b.arr.length - 1;
+      const canUp = !!b && b.lo > 0,
+        canDown = !!b && b.hi < b.arr.length - 1;
       const menu = h("div", { class: "menu-drop" });
-      const item = (label, key, on, fn) => menu.appendChild(h("div", {
-        class: "menu-item" + (on ? "" : " disabled"),
-        onclick() { if (!on) return; closeCmdMenu(); fn(); },
-      }, h("span", { class: "mi-label" }, label), key ? h("span", { class: "mi-key" }, key) : null));
+      const item = (label, key, on, fn) =>
+        menu.appendChild(
+          h(
+            "div",
+            {
+              class: "menu-item" + (on ? "" : " disabled"),
+              onclick() {
+                if (!on) return;
+                closeCmdMenu();
+                fn();
+              },
+            },
+            h("span", { class: "mi-label" }, label),
+            key ? h("span", { class: "mi-key" }, key) : null,
+          ),
+        );
       const sep = () => menu.appendChild(h("div", { class: "menu-sep" }));
       item("Add…", "", true, () => addAt());
       item("Edit", "", isCmd, () => editAt());
@@ -3472,32 +5777,62 @@ const editorI18n = await createEditorI18n({
       sep();
       item("Move Up", "", canUp, () => moveSel(-1));
       item("Move Down", "", canDown, () => moveSel(1));
-      menu.style.left = x + "px"; menu.style.top = y + "px";
+      menu.style.left = x + "px";
+      menu.style.top = y + "px";
       document.body.appendChild(menu);
-      menu.style.left = Math.max(4, Math.min(x, window.innerWidth - menu.offsetWidth - 4)) + "px";
-      menu.style.top = Math.max(4, Math.min(y, window.innerHeight - menu.offsetHeight - 4)) + "px";
+      menu.style.left =
+        Math.max(4, Math.min(x, window.innerWidth - menu.offsetWidth - 4)) +
+        "px";
+      menu.style.top =
+        Math.max(4, Math.min(y, window.innerHeight - menu.offsetHeight - 4)) +
+        "px";
       cmdMenuEl = menu;
       document.addEventListener("mousedown", onCmdMenuOutside, true);
       document.addEventListener("keydown", onCmdMenuKey, true);
     }
-    const btns = h("div", { class: "cmdbtns" },
+    const btns = h(
+      "div",
+      { class: "cmdbtns" },
       h("button", { onclick: () => addAt() }, "+ Add"),
       h("button", { onclick: () => editAt() }, "Edit"),
       h("button", { onclick: delAt }, "Delete"),
-      h("button", { title: "Copy command (Ctrl+C)", onclick: () => copySel(false) }, "Copy"),
-      h("button", { title: "Cut command (Ctrl+X)", onclick: () => copySel(true) }, "Cut"),
-      h("button", { title: "Paste command (Ctrl+V)", onclick: () => pasteSel() }, "Paste"),
+      h(
+        "button",
+        { title: "Copy command (Ctrl+C)", onclick: () => copySel(false) },
+        "Copy",
+      ),
+      h(
+        "button",
+        { title: "Cut command (Ctrl+X)", onclick: () => copySel(true) },
+        "Cut",
+      ),
+      h(
+        "button",
+        { title: "Paste command (Ctrl+V)", onclick: () => pasteSel() },
+        "Paste",
+      ),
       h("button", { onclick: () => moveSel(-1) }, "↑"),
       h("button", { onclick: () => moveSel(1) }, "↓"),
     );
     // Ctrl+C/X/V and Delete work when the command list has focus. The global editor shortcuts
     // are suppressed while a modal is open, so there's no collision with map copy/paste.
     listEl.addEventListener("keydown", (e) => {
-      if (e.code === "Delete") { e.preventDefault(); delAt(); return; }
+      if (e.code === "Delete") {
+        e.preventDefault();
+        delAt();
+        return;
+      }
       if (!(e.ctrlKey || e.metaKey)) return;
-      if (e.code === "KeyC") { e.preventDefault(); copySel(false); }
-      else if (e.code === "KeyX") { e.preventDefault(); copySel(true); }
-      else if (e.code === "KeyV") { e.preventDefault(); pasteSel(); }
+      if (e.code === "KeyC") {
+        e.preventDefault();
+        copySel(false);
+      } else if (e.code === "KeyX") {
+        e.preventDefault();
+        copySel(true);
+      } else if (e.code === "KeyV") {
+        e.preventDefault();
+        pasteSel();
+      }
     });
     wrap.appendChild(btns);
     wrap.appendChild(listEl);
@@ -3511,14 +5846,18 @@ const editorI18n = await createEditorI18n({
     let pageIdx = 0;
 
     // Per-page command undo/redo, keyed by page object; discarded with `ev` when the editor closes.
-    const cmdHist = new Map();                 // page -> { undo, redo }
+    const cmdHist = new Map(); // page -> { undo, redo }
     function histFor(p) {
       let hst = cmdHist.get(p);
-      if (!hst) { hst = { undo: [], redo: [] }; cmdHist.set(p, hst); }
+      if (!hst) {
+        hst = { undo: [], redo: [] };
+        cmdHist.set(p, hst);
+      }
       return hst;
     }
     const curPage = () => ev.pages[pageIdx];
-    function cmdSnapshot() {                    // call before mutating the current page's commands
+    function cmdSnapshot() {
+      // call before mutating the current page's commands
       const hst = histFor(curPage());
       hst.undo.push(RA.clone(curPage().commands));
       if (hst.undo.length > 60) hst.undo.shift();
@@ -3526,9 +5865,12 @@ const editorI18n = await createEditorI18n({
     }
     function cmdStep(from, to) {
       const hst = histFor(curPage());
-      if (!hst[from].length) { flashStatus(from === "undo" ? "Nothing to undo" : "Nothing to redo"); return false; }
+      if (!hst[from].length) {
+        flashStatus(from === "undo" ? "Nothing to undo" : "Nothing to redo");
+        return false;
+      }
       hst[to].push(RA.clone(curPage().commands));
-      curPage().commands = RA.clone(hst[from].pop());   // re-clone so the archived entry stays immutable
+      curPage().commands = RA.clone(hst[from].pop()); // re-clone so the archived entry stays immutable
       touch();
       return true;
     }
@@ -3543,22 +5885,43 @@ const editorI18n = await createEditorI18n({
     let evOverlay = null;
     function onEvKey(e) {
       if (modalRoot().lastElementChild !== evOverlay) return;
-      if (pageMenuEl) return;                    // a page context menu is open — let it own the keys
+      if (pageMenuEl) return; // a page context menu is open — let it own the keys
       const t = e.target;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT")) return;
-      const inCmdList = t && t.closest && t.closest(".cmdlist");   // the command list owns its own Delete/keys
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.tagName === "SELECT")
+      )
+        return;
+      const inCmdList = t && t.closest && t.closest(".cmdlist"); // the command list owns its own Delete/keys
       if (e.ctrlKey || e.metaKey) {
-        if (e.code === "KeyZ" && e.shiftKey) { e.preventDefault(); if (undoApi.redo()) redrawPage(); }
-        else if (e.code === "KeyZ") { e.preventDefault(); if (undoApi.undo()) redrawPage(); }
-        else if (e.code === "KeyY") { e.preventDefault(); if (undoApi.redo()) redrawPage(); }
+        if (e.code === "KeyZ" && e.shiftKey) {
+          e.preventDefault();
+          if (undoApi.redo()) redrawPage();
+        } else if (e.code === "KeyZ") {
+          e.preventDefault();
+          if (undoApi.undo()) redrawPage();
+        } else if (e.code === "KeyY") {
+          e.preventDefault();
+          if (undoApi.redo()) redrawPage();
+        }
         return;
       }
       if (e.code === "Delete" && !inCmdList) {
-        e.preventDefault(); deletePage(pageIdx); return;
+        e.preventDefault();
+        deletePage(pageIdx);
+        return;
       }
-      if (e.key >= "1" && e.key <= "9" && !inCmdList) {   // jump to page 1–9 if it exists
+      if (e.key >= "1" && e.key <= "9" && !inCmdList) {
+        // jump to page 1–9 if it exists
         const p = +e.key - 1;
-        if (p < ev.pages.length) { e.preventDefault(); pageIdx = p; redrawTabs(); redrawPage(); }
+        if (p < ev.pages.length) {
+          e.preventDefault();
+          pageIdx = p;
+          redrawTabs();
+          redrawPage();
+        }
       }
     }
     document.addEventListener("keydown", onEvKey);
@@ -3573,46 +5936,105 @@ const editorI18n = await createEditorI18n({
         ev.pages.splice(i, 1);
         if (pageIdx > i) pageIdx--;
         pageIdx = Math.min(pageIdx, ev.pages.length - 1);
-        redrawTabs(); redrawPage();
+        redrawTabs();
+        redrawPage();
       };
-      const n = ev.pages[i].commands.length;   // confirm only if there are commands to lose (can't be undone)
-      if (n) confirmBox("This page has " + n + " command" + (n === 1 ? "" : "s") + " that will be permanently lost. Delete this page?", del);
+      const n = ev.pages[i].commands.length; // confirm only if there are commands to lose (can't be undone)
+      if (n)
+        confirmBox(
+          "This page has " +
+            n +
+            " command" +
+            (n === 1 ? "" : "s") +
+            " that will be permanently lost. Delete this page?",
+          del,
+        );
       else del();
     }
-    function addPageAt(i) { ev.pages.splice(i, 0, DataDefaults.newPage()); pageIdx = i; redrawTabs(); redrawPage(); }
-    function copyPage(i) { clipPage = RA.clone(ev.pages[i]); flashStatus("Copied page " + (i + 1)); }
-    function pastePage(i) { if (!clipPage) return; ev.pages.splice(i + 1, 0, RA.clone(clipPage)); pageIdx = i + 1; redrawTabs(); redrawPage(); }
+    function addPageAt(i) {
+      ev.pages.splice(i, 0, DataDefaults.newPage());
+      pageIdx = i;
+      redrawTabs();
+      redrawPage();
+    }
+    function copyPage(i) {
+      clipPage = RA.clone(ev.pages[i]);
+      flashStatus("Copied page " + (i + 1));
+    }
+    function pastePage(i) {
+      if (!clipPage) return;
+      ev.pages.splice(i + 1, 0, RA.clone(clipPage));
+      pageIdx = i + 1;
+      redrawTabs();
+      redrawPage();
+    }
     function movePage(i, d) {
       const j = i + d;
       if (j < 0 || j >= ev.pages.length) return;
       ev.pages.splice(j, 0, ev.pages.splice(i, 1)[0]);
-      pageIdx = j; redrawTabs(); redrawPage();
+      pageIdx = j;
+      redrawTabs();
+      redrawPage();
     }
 
     // Page tabs: rename (double-click or menu), right-click menu, and drag-reorder.
-    let pageMenuEl = null, dragPageFrom = null, editingPage = null;
-    function startRename(i) { editingPage = i; redrawTabs(); }
-    function commitRename(i, value) { ev.pages[i].name = value.trim(); editingPage = null; touch(); redrawTabs(); redrawPage(); }
+    let pageMenuEl = null,
+      dragPageFrom = null,
+      editingPage = null;
+    function startRename(i) {
+      editingPage = i;
+      redrawTabs();
+    }
+    function commitRename(i, value) {
+      ev.pages[i].name = value.trim();
+      editingPage = null;
+      touch();
+      redrawTabs();
+      redrawPage();
+    }
     function closePageMenu() {
       if (!pageMenuEl) return;
-      pageMenuEl.remove(); pageMenuEl = null;
+      pageMenuEl.remove();
+      pageMenuEl = null;
       document.removeEventListener("mousedown", onPageMenuOutside, true);
       document.removeEventListener("keydown", onPageMenuKey, true);
     }
-    function onPageMenuOutside(e) { if (pageMenuEl && !pageMenuEl.contains(e.target)) closePageMenu(); }
-    function onPageMenuKey(e) { if (e.key === "Escape") { e.preventDefault(); closePageMenu(); } }
+    function onPageMenuOutside(e) {
+      if (pageMenuEl && !pageMenuEl.contains(e.target)) closePageMenu();
+    }
+    function onPageMenuKey(e) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closePageMenu();
+      }
+    }
     function openPageMenu(e, i) {
       e.preventDefault();
-      const x = e.clientX, y = e.clientY, last = ev.pages.length - 1;
-      pageIdx = i; redrawTabs(); redrawPage();   // right-click selects the tab first
+      const x = e.clientX,
+        y = e.clientY,
+        last = ev.pages.length - 1;
+      pageIdx = i;
+      redrawTabs();
+      redrawPage(); // right-click selects the tab first
       closePageMenu();
       const menu = h("div", { class: "menu-drop" });
-      const item = (label, on, fn) => menu.appendChild(h("div", {
-        class: "menu-item" + (on ? "" : " disabled"),
-        onclick() { if (!on) return; closePageMenu(); fn(); },
-      }, h("span", { class: "mi-label" }, label)));
+      const item = (label, on, fn) =>
+        menu.appendChild(
+          h(
+            "div",
+            {
+              class: "menu-item" + (on ? "" : " disabled"),
+              onclick() {
+                if (!on) return;
+                closePageMenu();
+                fn();
+              },
+            },
+            h("span", { class: "mi-label" }, label),
+          ),
+        );
       const sep = () => menu.appendChild(h("div", { class: "menu-sep" }));
-      item("Add page", true, () => addPageAt(i + 1));   // to the right, like Paste
+      item("Add page", true, () => addPageAt(i + 1)); // to the right, like Paste
       item("Rename", true, () => startRename(i));
       item("Move left", i > 0, () => movePage(i, -1));
       item("Move right", i < last, () => movePage(i, 1));
@@ -3621,70 +6043,182 @@ const editorI18n = await createEditorI18n({
       item("Paste", !!clipPage, () => pastePage(i));
       item("Delete", ev.pages.length > 1, () => deletePage(i));
       document.body.appendChild(menu);
-      menu.style.left = Math.max(4, Math.min(x, window.innerWidth - menu.offsetWidth - 4)) + "px";
-      menu.style.top = Math.max(4, Math.min(y, window.innerHeight - menu.offsetHeight - 4)) + "px";
+      menu.style.left =
+        Math.max(4, Math.min(x, window.innerWidth - menu.offsetWidth - 4)) +
+        "px";
+      menu.style.top =
+        Math.max(4, Math.min(y, window.innerHeight - menu.offsetHeight - 4)) +
+        "px";
       pageMenuEl = menu;
       document.addEventListener("mousedown", onPageMenuOutside, true);
       document.addEventListener("keydown", onPageMenuKey, true);
     }
-    function clearTabDrops() { tabs.querySelectorAll(".drop-left, .drop-right").forEach((b) => b.classList.remove("drop-left", "drop-right")); }
+    function clearTabDrops() {
+      tabs
+        .querySelectorAll(".drop-left, .drop-right")
+        .forEach((b) => b.classList.remove("drop-left", "drop-right"));
+    }
     function redrawTabs() {
       tabs.innerHTML = "";
       ev.pages.forEach((_, i) => {
-        if (editingPage === i) {                  // inline rename: an input replaces the tab button
-          const inp = h("input", { class: "tab-rename", value: ev.pages[i].name || "",
+        if (editingPage === i) {
+          // inline rename: an input replaces the tab button
+          const inp = h("input", {
+            class: "tab-rename",
+            value: ev.pages[i].name || "",
             onkeydown(e) {
-              if (e.key === "Enter") { e.preventDefault(); commitRename(i, inp.value); }
-              else if (e.key === "Escape") { e.preventDefault(); editingPage = null; redrawTabs(); }
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commitRename(i, inp.value);
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                editingPage = null;
+                redrawTabs();
+              }
             },
-            onblur() { if (editingPage === i) commitRename(i, inp.value); },
+            onblur() {
+              if (editingPage === i) commitRename(i, inp.value);
+            },
           });
           tabs.appendChild(inp);
-          setTimeout(() => { inp.focus(); inp.select(); }, 0);
+          setTimeout(() => {
+            inp.focus();
+            inp.select();
+          }, 0);
           return;
         }
-        const btn = h("button", {
-          class: i === pageIdx ? "sel" : "",
-          onclick() { pageIdx = i; redrawTabs(); redrawPage(); },
-          ondblclick() { startRename(i); },
-          oncontextmenu(e) { openPageMenu(e, i); },
-        }, ev.pages[i].name || ("Page " + (i + 1)));
+        const btn = h(
+          "button",
+          {
+            class: i === pageIdx ? "sel" : "",
+            onclick() {
+              pageIdx = i;
+              redrawTabs();
+              redrawPage();
+            },
+            ondblclick() {
+              startRename(i);
+            },
+            oncontextmenu(e) {
+              openPageMenu(e, i);
+            },
+          },
+          ev.pages[i].name || "Page " + (i + 1),
+        );
         btn.draggable = true;
-        btn.addEventListener("dragstart", (e) => { dragPageFrom = i; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", "page"); btn.classList.add("dragging"); });
-        btn.addEventListener("dragend", () => { btn.classList.remove("dragging"); clearTabDrops(); dragPageFrom = null; });
+        btn.addEventListener("dragstart", (e) => {
+          dragPageFrom = i;
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", "page");
+          btn.classList.add("dragging");
+        });
+        btn.addEventListener("dragend", () => {
+          btn.classList.remove("dragging");
+          clearTabDrops();
+          dragPageFrom = null;
+        });
         btn.addEventListener("dragover", (e) => {
           if (dragPageFrom === null || dragPageFrom === i) return;
-          e.preventDefault(); e.dataTransfer.dropEffect = "move"; clearTabDrops();
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          clearTabDrops();
           const r = btn.getBoundingClientRect();
-          btn.classList.add(e.clientX - r.left < r.width / 2 ? "drop-left" : "drop-right");
+          btn.classList.add(
+            e.clientX - r.left < r.width / 2 ? "drop-left" : "drop-right",
+          );
         });
-        btn.addEventListener("dragleave", () => btn.classList.remove("drop-left", "drop-right"));
+        btn.addEventListener("dragleave", () =>
+          btn.classList.remove("drop-left", "drop-right"),
+        );
         btn.addEventListener("drop", (e) => {
           if (dragPageFrom === null || dragPageFrom === i) return;
           e.preventDefault();
           const r = btn.getBoundingClientRect();
           let to = e.clientX - r.left < r.width / 2 ? i : i + 1;
-          const from = dragPageFrom; dragPageFrom = null; clearTabDrops();
-          if (from < to) to--;                   // the removed page shifts later indices down
+          const from = dragPageFrom;
+          dragPageFrom = null;
+          clearTabDrops();
+          if (from < to) to--; // the removed page shifts later indices down
           ev.pages.splice(to, 0, ev.pages.splice(from, 1)[0]);
-          pageIdx = to; redrawTabs(); redrawPage();
+          pageIdx = to;
+          redrawTabs();
+          redrawPage();
         });
         tabs.appendChild(btn);
       });
-      tabs.appendChild(h("button", { class: "mini", title: "Add a page", onclick() { ev.pages.push(DataDefaults.newPage()); pageIdx = ev.pages.length - 1; redrawTabs(); redrawPage(); } }, "+"));
-      tabs.appendChild(h("button", { class: "mini", title: "Delete this page", onclick() { deletePage(pageIdx); } }, "−"));
+      tabs.appendChild(
+        h(
+          "button",
+          {
+            class: "mini",
+            title: "Add a page",
+            onclick() {
+              ev.pages.push(DataDefaults.newPage());
+              pageIdx = ev.pages.length - 1;
+              redrawTabs();
+              redrawPage();
+            },
+          },
+          "+",
+        ),
+      );
+      tabs.appendChild(
+        h(
+          "button",
+          {
+            class: "mini",
+            title: "Delete this page",
+            onclick() {
+              deletePage(pageIdx);
+            },
+          },
+          "−",
+        ),
+      );
     }
     function redrawPage() {
       const pg = ev.pages[pageIdx];
       pageBox.innerHTML = "";
       // conditions
-      const condBox = h("div", { class: "subbox" },
+      const condBox = h(
+        "div",
+        { class: "subbox" },
         h("div", { class: "subhead" }, "Page conditions (all must hold)"),
-        row(field("Switch ON", sel(pg.cond, "switchId", switchOpts())),
-          field("Variable ≥", sel(pg.cond, "varId", varOpts())), field("…value", nIn(pg.cond, "varVal")),
-          field("Self-Switch ON", sel(pg.cond, "selfSw", [{ v: "", l: "(none)" }, { v: "A", l: "A" }, { v: "B", l: "B" }, { v: "C", l: "C" }, { v: "D", l: "D" }]))),
-        row(field("Quest", sel(pg.cond, "questId", dbOpts(proj.quests, "(none)"))),
-          field("Status", sel(pg.cond, "questStatus", stringSelOpts(["inactive", "active", "completed", "failed", "abandoned"])))),
+        row(
+          field("Switch ON", sel(pg.cond, "switchId", switchOpts())),
+          field("Variable ≥", sel(pg.cond, "varId", varOpts())),
+          field("…value", nIn(pg.cond, "varVal")),
+          field(
+            "Self-Switch ON",
+            sel(pg.cond, "selfSw", [
+              { v: "", l: "(none)" },
+              { v: "A", l: "A" },
+              { v: "B", l: "B" },
+              { v: "C", l: "C" },
+              { v: "D", l: "D" },
+            ]),
+          ),
+        ),
+        row(
+          field(
+            "Quest",
+            sel(pg.cond, "questId", dbOpts(proj.quests, "(none)")),
+          ),
+          field(
+            "Status",
+            sel(
+              pg.cond,
+              "questStatus",
+              stringSelOpts([
+                "inactive",
+                "active",
+                "completed",
+                "failed",
+                "abandoned",
+              ]),
+            ),
+          ),
+        ),
       );
       const objectiveRow = h("div", { class: "frow" });
       function redrawObjectiveCond() {
@@ -3693,15 +6227,36 @@ const editorI18n = await createEditorI18n({
         const objWrap = h("span");
         const redrawObjectiveList = () => {
           const q = RA.byId(proj.quests, pg.cond.objectiveQuestId);
-          const opts = [{ v: 0, l: "(none)" }].concat(((q && q.objectives) || []).map((obj, i) => ({ v: i, l: (i + 1) + ": " + (obj.label || obj.kind || "Objective") })));
+          const opts = [{ v: 0, l: "(none)" }].concat(
+            ((q && q.objectives) || []).map((obj, i) => ({
+              v: i,
+              l: i + 1 + ": " + (obj.label || obj.kind || "Objective"),
+            })),
+          );
           objWrap.innerHTML = "";
           objWrap.appendChild(sel(pg.cond, "objectiveIndex", opts));
         };
-        questWrap.appendChild(sel(pg.cond, "objectiveQuestId", dbOpts(proj.quests, "(none)"), redrawObjectiveList));
+        questWrap.appendChild(
+          sel(
+            pg.cond,
+            "objectiveQuestId",
+            dbOpts(proj.quests, "(none)"),
+            redrawObjectiveList,
+          ),
+        );
         redrawObjectiveList();
         objectiveRow.appendChild(field("Objective Quest", questWrap));
         objectiveRow.appendChild(field("Objective", objWrap));
-        objectiveRow.appendChild(field("Objective is", sel(pg.cond, "objectiveStatus", stringSelOpts(["incomplete", "completed"]))));
+        objectiveRow.appendChild(
+          field(
+            "Objective is",
+            sel(
+              pg.cond,
+              "objectiveStatus",
+              stringSelOpts(["incomplete", "completed"]),
+            ),
+          ),
+        );
       }
       redrawObjectiveCond();
       condBox.appendChild(objectiveRow);
@@ -3710,17 +6265,45 @@ const editorI18n = await createEditorI18n({
       function redrawPreview() {
         preview.innerHTML = "";
         const ci = Assets.charsetIndex(pg.charset);
-        if (ci >= 0) preview.appendChild(Assets.charFrameCanvas(ci, pg.dir || 0, 1));
+        if (ci >= 0)
+          preview.appendChild(Assets.charFrameCanvas(ci, pg.dir || 0, 1));
       }
-      const appBox = h("div", { class: "subbox" },
+      const appBox = h(
+        "div",
+        { class: "subbox" },
         h("div", { class: "subhead" }, "Appearance & behaviour"),
-        row(field("Graphic", sel(pg, "charset", charsetOpts(), redrawPreview)), field("Facing", sel(pg, "dir", DIR_OPTS, redrawPreview)), preview),
-        row(field("Trigger", sel(pg, "trigger", [
-            { v: "action", l: "Action button" }, { v: "touch", l: "Player touch" },
-            { v: "auto", l: "Autorun" }, { v: "parallel", l: "Parallel" }])),
-          field("Movement", sel(pg, "moveType", [{ v: "fixed", l: "Fixed" }, { v: "random", l: "Random" }])),
-          field("Priority", sel(pg, "priority", [{ v: "below", l: "Below player" }, { v: "same", l: "Same as player" }, { v: "above", l: "Above player" }])),
-          field("Through", chk(pg, "through"))),
+        row(
+          field("Graphic", sel(pg, "charset", charsetOpts(), redrawPreview)),
+          field("Facing", sel(pg, "dir", DIR_OPTS, redrawPreview)),
+          preview,
+        ),
+        row(
+          field(
+            "Trigger",
+            sel(pg, "trigger", [
+              { v: "action", l: "Action button" },
+              { v: "touch", l: "Player touch" },
+              { v: "auto", l: "Autorun" },
+              { v: "parallel", l: "Parallel" },
+            ]),
+          ),
+          field(
+            "Movement",
+            sel(pg, "moveType", [
+              { v: "fixed", l: "Fixed" },
+              { v: "random", l: "Random" },
+            ]),
+          ),
+          field(
+            "Priority",
+            sel(pg, "priority", [
+              { v: "below", l: "Below player" },
+              { v: "same", l: "Same as player" },
+              { v: "above", l: "Above player" },
+            ]),
+          ),
+          field("Through", chk(pg, "through")),
+        ),
       );
       redrawPreview();
       pageBox.appendChild(condBox);
@@ -3730,33 +6313,58 @@ const editorI18n = await createEditorI18n({
       pageBox.appendChild(cw.el);
     }
 
-    head.appendChild(row(field("Event name", tIn(ev, "name")),
-      h("div", { class: "fld" }, h("span", null, "Position"), h("span", { class: "dim" }, ev.x + ", " + ev.y))));
+    head.appendChild(
+      row(
+        field("Event name", tIn(ev, "name")),
+        h(
+          "div",
+          { class: "fld" },
+          h("span", null, "Position"),
+          h("span", { class: "dim" }, ev.x + ", " + ev.y),
+        ),
+      ),
+    );
     head.appendChild(tabs);
     head.appendChild(pageBox);
-    redrawTabs(); redrawPage();
+    redrawTabs();
+    redrawPage();
 
     const evModal = modal({
       title: "Event — " + esc(evOriginal.name),
       content: head,
       wide: true,
       dismissable: false,
-      onClose() { closePageMenu(); document.removeEventListener("keydown", onEvKey); },
+      onClose() {
+        closePageMenu();
+        document.removeEventListener("keydown", onEvKey);
+      },
       buttons: [
-        { label: "OK", primary: true, onClick(close) {
-          pushUndo();
-          Object.assign(evOriginal, ev);
-          touch(); renderMap(); close();
-        } },
-        { label: "Delete Event", onClick(close) {
-          confirmBox("Delete this event?", () => {
+        {
+          label: "OK",
+          primary: true,
+          onClick(close) {
             pushUndo();
-            const m = curMap();
-            m.events = m.events.filter((e) => e.id !== evOriginal.id);
-            selectedEvent = null;
-            touch(); renderMap(); refreshToolbar(); close();
-          });
-        } },
+            Object.assign(evOriginal, ev);
+            touch();
+            renderMap();
+            close();
+          },
+        },
+        {
+          label: "Delete Event",
+          onClick(close) {
+            confirmBox("Delete this event?", () => {
+              pushUndo();
+              const m = curMap();
+              m.events = m.events.filter((e) => e.id !== evOriginal.id);
+              selectedEvent = null;
+              touch();
+              renderMap();
+              refreshToolbar();
+              close();
+            });
+          },
+        },
         { label: "Cancel" },
       ],
     });
@@ -3772,10 +6380,25 @@ const editorI18n = await createEditorI18n({
     { v: "heal", l: "Healing skills" },
   ];
   function traitDefault(type) {
-    if (type === "element") return { type, key: (RA.typeList(proj, "elements")[0] || { key: "physical" }).key, value: 100 };
-    if (type === "state") return { type, key: String(proj.states[0] ? proj.states[0].id : 1), value: 100 };
+    if (type === "element")
+      return {
+        type,
+        key: (RA.typeList(proj, "elements")[0] || { key: "physical" }).key,
+        value: 100,
+      };
+    if (type === "state")
+      return {
+        type,
+        key: String(proj.states[0] ? proj.states[0].id : 1),
+        value: 100,
+      };
     if (type === "skill") return { type, key: "phys", value: 100 };
-    if (type === "equip") return { type, key: "weapon", value: proj.weapons[0] ? proj.weapons[0].id : 0 };
+    if (type === "equip")
+      return {
+        type,
+        key: "weapon",
+        value: proj.weapons[0] ? proj.weapons[0].id : 0,
+      };
     if (type === "special") return { type, key: "critChance", value: 5 };
     return { type: "param", key: "atk", value: 100 };
   }
@@ -3789,57 +6412,119 @@ const editorI18n = await createEditorI18n({
     function redrawList() {
       listEl.innerHTML = "";
       for (const e of spec.list()) {
-        const li = h("li", { class: e === cur ? "sel" : "", onclick() { cur = e; redrawList(); redrawForm(); } },
-          h("span", { class: "db-entry-id" }, e.id + ":"));
-        if (e.icon != null) li.appendChild(Assets.iconSpan(e.icon, "db-entry-icon"));
+        const li = h(
+          "li",
+          {
+            class: e === cur ? "sel" : "",
+            onclick() {
+              cur = e;
+              redrawList();
+              redrawForm();
+            },
+          },
+          h("span", { class: "db-entry-id" }, e.id + ":"),
+        );
+        if (e.icon != null)
+          li.appendChild(Assets.iconSpan(e.icon, "db-entry-icon"));
         li.appendChild(h("span", null, e.name || "—"));
         listEl.appendChild(li);
       }
     }
     function redrawForm() {
       formEl.innerHTML = "";
-      if (cur) spec.form(cur, formEl, () => { redrawList(); });
-    }
-    const btns = h("div", { class: "dbbtns" },
-      h("button", { onclick() {
-        const e = spec.blank();
-        e.id = RA.nextId(spec.list());
-        spec.list().push(e);
-        cur = e; touch(); redrawList(); redrawForm();
-      } }, "+ New"),
-      ...(spec.reorderable ? [
-        h("button", { class: "mini", title: "Move earlier", onclick() {
-          if (!cur) return;
-          const arr = spec.list();
-          const i = arr.indexOf(cur);
-          if (i <= 0) return;
-          const [moved] = arr.splice(i, 1);
-          arr.splice(i - 1, 0, moved);
-          touch(); redrawList(); redrawForm();
-        } }, "↑"),
-        h("button", { class: "mini", title: "Move later", onclick() {
-          if (!cur) return;
-          const arr = spec.list();
-          const i = arr.indexOf(cur);
-          if (i < 0 || i >= arr.length - 1) return;
-          const [moved] = arr.splice(i, 1);
-          arr.splice(i + 1, 0, moved);
-          touch(); redrawList(); redrawForm();
-        } }, "↓"),
-      ] : []),
-      h("button", { onclick() {
-        if (!cur) return;
-        if (spec.allowEmpty !== true && spec.list().length <= 1) { alert("Keep at least one entry."); return; }
-        confirmBox(t("status.confirm_delete_entry", { name: cur.name }), () => {
-          const arr = spec.list();
-          arr.splice(arr.indexOf(cur), 1);
-          cur = arr[0] || null;
-          touch(); redrawList(); redrawForm();
+      if (cur)
+        spec.form(cur, formEl, () => {
+          redrawList();
         });
-      } }, "Delete"),
+    }
+    const btns = h(
+      "div",
+      { class: "dbbtns" },
+      h(
+        "button",
+        {
+          onclick() {
+            const e = spec.blank();
+            e.id = RA.nextId(spec.list());
+            spec.list().push(e);
+            cur = e;
+            touch();
+            redrawList();
+            redrawForm();
+          },
+        },
+        "+ New",
+      ),
+      ...(spec.reorderable
+        ? [
+            h(
+              "button",
+              {
+                class: "mini",
+                title: "Move earlier",
+                onclick() {
+                  if (!cur) return;
+                  const arr = spec.list();
+                  const i = arr.indexOf(cur);
+                  if (i <= 0) return;
+                  const [moved] = arr.splice(i, 1);
+                  arr.splice(i - 1, 0, moved);
+                  touch();
+                  redrawList();
+                  redrawForm();
+                },
+              },
+              "↑",
+            ),
+            h(
+              "button",
+              {
+                class: "mini",
+                title: "Move later",
+                onclick() {
+                  if (!cur) return;
+                  const arr = spec.list();
+                  const i = arr.indexOf(cur);
+                  if (i < 0 || i >= arr.length - 1) return;
+                  const [moved] = arr.splice(i, 1);
+                  arr.splice(i + 1, 0, moved);
+                  touch();
+                  redrawList();
+                  redrawForm();
+                },
+              },
+              "↓",
+            ),
+          ]
+        : []),
+      h(
+        "button",
+        {
+          onclick() {
+            if (!cur) return;
+            if (spec.allowEmpty !== true && spec.list().length <= 1) {
+              alert("Keep at least one entry.");
+              return;
+            }
+            confirmBox(
+              t("status.confirm_delete_entry", { name: cur.name }),
+              () => {
+                const arr = spec.list();
+                arr.splice(arr.indexOf(cur), 1);
+                cur = arr[0] || null;
+                touch();
+                redrawList();
+                redrawForm();
+              },
+            );
+          },
+        },
+        "Delete",
+      ),
     );
     cur = spec.list()[0] || null;
-    redrawList(); redrawForm();
+    redrawList();
+    redrawForm();
     wrap.appendChild(h("div", { class: "dbside" }, btns, listEl));
     wrap.appendChild(formEl);
     return wrap;
@@ -3851,651 +6536,1656 @@ const editorI18n = await createEditorI18n({
   }
   function iconPickerField(entry, redrawList) {
     if (entry.icon == null) entry.icon = 0;
-    const preview = h("span", { class: "icon-preview-wrap" }, Assets.iconSpan(entry.icon, "icon-preview"));
-    const button = h("button", { class: "icon-pick-button", onclick(ev) {
-      ev.preventDefault();
-      const grid = h("div", { class: "icon-picker-grid" });
-      let picker = null;
-      for (let i = 0; i < Assets.ICON_COUNT; i++) {
-        grid.appendChild(h("button", {
-          class: "icon-choice" + (i === entry.icon ? " sel" : ""),
-          title: "Icon " + i,
-          onclick() {
-            entry.icon = i;
-            touch();
-            redrawList();
-            preview.innerHTML = "";
-            preview.appendChild(Assets.iconSpan(i, "icon-preview"));
-            picker.close();
-          },
-        }, Assets.iconSpan(i)));
-      }
-      picker = modal({ title: "Choose Icon", content: grid, wide: true, buttons: [{ label: "Cancel" }] });
-    } }, preview, h("span", null, "Choose Icon"));
-    return h("div", { class: "fld icon-field" }, h("span", null, "Icon"), button);
+    const preview = h(
+      "span",
+      { class: "icon-preview-wrap" },
+      Assets.iconSpan(entry.icon, "icon-preview"),
+    );
+    const button = h(
+      "button",
+      {
+        class: "icon-pick-button",
+        onclick(ev) {
+          ev.preventDefault();
+          const grid = h("div", { class: "icon-picker-grid" });
+          let picker = null;
+          for (let i = 0; i < Assets.ICON_COUNT; i++) {
+            grid.appendChild(
+              h(
+                "button",
+                {
+                  class: "icon-choice" + (i === entry.icon ? " sel" : ""),
+                  title: "Icon " + i,
+                  onclick() {
+                    entry.icon = i;
+                    touch();
+                    redrawList();
+                    preview.innerHTML = "";
+                    preview.appendChild(Assets.iconSpan(i, "icon-preview"));
+                    picker.close();
+                  },
+                },
+                Assets.iconSpan(i),
+              ),
+            );
+          }
+          picker = modal({
+            title: "Choose Icon",
+            content: grid,
+            wide: true,
+            buttons: [{ label: "Cancel" }],
+          });
+        },
+      },
+      preview,
+      h("span", null, "Choose Icon"),
+    );
+    return h(
+      "div",
+      { class: "fld icon-field" },
+      h("span", null, "Icon"),
+      button,
+    );
   }
 
   function dbTabs() {
     return [
-      { label: "System", build() {
-        const s = proj.system;
-        const box = h("div", { class: "dbform single" });
-        box.appendChild(field("Game title", tIn(s, "title")));
-        box.appendChild(row(field("Start map", sel(s, "startMapId", dbOpts(proj.maps))),
-          field("X", nIn(s, "startX", 0, 200)), field("Y", nIn(s, "startY", 0, 200)),
-          field("Facing", sel(s, "startDir", DIR_OPTS)),
-          field("Start transparent", chk(s, "startTransparent"))));
-        box.appendChild(h("div", { class: "dim" }, "Tip: use the “Start” mode button and click the map to set this visually. A transparent player is invisible until an event runs “Change Transparency” — handy for intro cutscenes."));
-        const partyRow = h("div");
-        for (let i = 0; i < 4; i++) {
-          const slot = { v: s.party[i] || 0 };
-          partyRow.appendChild(field("Member " + (i + 1), sel(slot, "v", dbOpts(proj.actors, "(empty)"), () => {
-            s.party[i] = slot.v || undefined;
-            s.party = s.party.filter(Boolean);
-            touch();
-          })));
-        }
-        box.appendChild(h("div", { class: "subhead" }, "Starting party"));
-        box.appendChild(h("div", { class: "frow" }, partyRow));
-        box.appendChild(row(field("Starting gold", nIn(s, "startGold", 0)), field("Currency name", tIn(s, "currency")),
-          field("Battle view", sel(s, "battleView", [{ v: "side", l: "Side view (party sprites)" }, { v: "front", l: "Front view (classic)" }]))));
-
-        box.appendChild(h("div", { class: "subhead" }, "Screen"));
-        box.appendChild(row(field("Game width (px)", nIn(s, "screenWidth", 384, 3840)),
-          field("Game height (px)", nIn(s, "screenHeight", 288, 2160)),
-          field("Screen scale (max zoom)", nIn(s, "screenScale", 0.5, 4, 0.1))));
-        box.appendChild(row(field("UI area width (0 = full)", nIn(s, "uiWidth", 0, 3840)),
-          field("UI area height (0 = full)", nIn(s, "uiHeight", 0, 2160))));
-        box.appendChild(h("div", { class: "dim" }, "The UI area centres message windows and menus inside the game screen — useful on very wide screens. Changes apply on the next playtest."));
-
-        box.appendChild(h("div", { class: "subhead" }, "Windows & fonts"));
-        const fontOpts = RA.FONTS.slice();
-        fontOpts.stringValues = true;
-        box.appendChild(row(field("Message font", sel(s, "fontText", fontOpts)),
-          field("Menu font", sel(s, "fontMenu", fontOpts))));
-        box.appendChild(row(field("Font size (px)", nIn(s, "fontSize", 8, 48)),
-          field("Window opacity", rangeIn(s, "windowOpacity", 0, 100, "%"))));
-
-        box.appendChild(h("div", { class: "subhead" }, "System sounds"));
-        const seOpts = SE_NAMES.map((n) => ({ v: n, l: n }));
-        seOpts.stringValues = true;
-        const sgrid = h("div", { class: "sysgrid" });
-        for (const def of RA.SYSTEM_SOUNDS) {
-          sgrid.appendChild(field(def.label, h("span", { class: "frow", style: "gap:4px; flex-wrap:nowrap" },
-            sel(s.sounds, def.key, seOpts),
-            h("button", { class: "mini", onclick() { Sfx.play(s.sounds[def.key] || def.def); } }, "▶"))));
-        }
-        box.appendChild(sgrid);
-
-        box.appendChild(h("div", { class: "subhead" }, "System music"));
-        box.appendChild(row(field("Title theme", sel(s.music, "title", MUSIC_OPTS())),
-          field("Battle theme", sel(s.music, "battle", MUSIC_OPTS()))));
-        return box;
-      } },
-      { label: "Actors", build: () => listFormTab({
-        list: () => proj.actors,
-        blank: () => ({ id: 0, name: "Actor", classId: proj.classes[0].id, level: 1, charset: "hero", weaponId: 0, armorId: 0 }),
-        form(e, box, redrawList) {
-          const preview = h("span", { class: "char-preview" });
-          function rp() {
-            preview.innerHTML = "";
-            const ci = Assets.charsetIndex(e.charset);
-            if (ci >= 0) { preview.appendChild(Assets.faceCanvas(ci)); }
-          }
-          box.appendChild(row(field("Name", nameRefresher(e, redrawList)), field("Class", sel(e, "classId", dbOpts(proj.classes))), field("Initial level", nIn(e, "level", 1, 99))));
-          box.appendChild(row(field("Sprite", sel(e, "charset", charsetOpts(true), rp)), preview));
-          box.appendChild(row(field("Initial weapon", sel(e, "weaponId", dbOpts(proj.weapons, "(none)"))),
-            field("Initial armor", sel(e, "armorId", dbOpts(proj.armors, "(none)")))));
-          rp();
-        },
-      }) },
-      { label: "Classes", build: () => listFormTab({
-        list: () => proj.classes,
-        blank: () => ({ id: 0, name: "Class", icon: 0, base: { mhp: 40, mmp: 12, atk: 10, def: 9, mat: 8, mdf: 8, agi: 8 },
-          growth: { mhp: 7, mmp: 2, atk: 2, def: 1.8, mat: 1.8, mdf: 1.8, agi: 1.5 }, traits: [], learnings: [] }),
-        form(e, box, redrawList) {
-          box.appendChild(row(field("Name", nameRefresher(e, redrawList)), iconPickerField(e, redrawList)));
-          const bRow = h("div", { class: "frow" }), gRow = h("div", { class: "frow" });
-          for (const k of STAT_KEYS) bRow.appendChild(field(k.toUpperCase(), nIn(e.base, k, 0, 9999)));
-          for (const k of STAT_KEYS) gRow.appendChild(field("+" + k.toUpperCase() + "/lv", nIn(e.growth, k, 0, 999, 0.1)));
-          box.appendChild(h("div", { class: "subhead" }, "Base stats (level 1)"));
-          box.appendChild(bRow);
-          box.appendChild(h("div", { class: "subhead" }, "Growth per level"));
-          box.appendChild(gRow);
-          // traits
-          e.traits = Array.isArray(e.traits) ? e.traits : [];
-          const traitBox = h("div", { class: "trait-list" });
-          function traitKeyOptions(t) {
-            if (t.type === "param") {
-              const opts = STAT_KEYS.map((k) => ({ v: k, l: k.toUpperCase() }));
-              opts.stringValues = true;
-              return opts;
-            }
-            if (t.type === "element") {
-              return elementSelOpts();
-            }
-            if (t.type === "state") {
-              const opts = dbOpts(proj.states);
-              opts.stringValues = true;
-              return opts;
-            }
-            if (t.type === "skill") {
-              return skillTypeTraitOpts();
-            }
-            if (t.type === "equip") {
-              const opts = [{ v: "weapon", l: "Weapon" }, { v: "armor", l: "Armor" }];
-              opts.stringValues = true;
-              return opts;
-            }
-            const opts = RA.TRAIT_SPECIALS.slice();
-            opts.stringValues = true;
-            return opts;
-          }
-          function traitValueLabel(t) {
-            if (t.type === "param") return "Stat rate %";
-            if (t.type === "element") return "Damage taken %";
-            if (t.type === "state") return "Infliction chance %";
-            if (t.type === "skill") return "Power rate %";
-            return "Value %";
-          }
-          function redrawTraits() {
-            traitBox.innerHTML = "";
-            e.traits.forEach((t, i) => {
-              const typeOpts = RA.TRAIT_TYPES.slice();
-              typeOpts.stringValues = true;
-              const typeSelect = sel(t, "type", typeOpts, (type) => {
-                Object.assign(t, traitDefault(type));
-                redrawTraits();
-              });
-              const keySelect = sel(t, "key", traitKeyOptions(t), () => {
-                if (t.type === "equip") {
-                  const db = t.key === "armor" ? proj.armors : proj.weapons;
-                  if (!db.some((item) => item.id === Number(t.value))) t.value = db[0] ? db[0].id : 0;
-                  redrawTraits();
-                }
-              });
-              let valueControl;
-              if (t.type === "equip") {
-                const db = t.key === "armor" ? proj.armors : proj.weapons;
-                valueControl = field("Allowed item", sel(t, "value", dbOpts(db, "(none)")));
-              } else {
-                const max = t.type === "special" && t.key === "critChance" ? 100 : 999;
-                valueControl = field(traitValueLabel(t), nIn(t, "value", 0, max));
-              }
-              const controls = h("div", { class: "trait-actions" },
-                h("button", {
-                  class: "mini", title: "Move trait up", "aria-label": "Move trait up",
-                  ...(i === 0 ? { disabled: "" } : {}),
-                  onclick() {
-                    if (i <= 0) return;
-                    const [moved] = e.traits.splice(i, 1); e.traits.splice(i - 1, 0, moved);
-                    touch(); redrawTraits();
-                  },
-                }, "↑"),
-                h("button", {
-                  class: "mini", title: "Move trait down", "aria-label": "Move trait down",
-                  ...(i === e.traits.length - 1 ? { disabled: "" } : {}),
-                  onclick() {
-                    if (i >= e.traits.length - 1) return;
-                    const [moved] = e.traits.splice(i, 1); e.traits.splice(i + 1, 0, moved);
-                    touch(); redrawTraits();
-                  },
-                }, "↓"),
-                h("button", {
-                  class: "mini danger", title: "Delete trait", "aria-label": "Delete trait",
-                  onclick() { e.traits.splice(i, 1); touch(); redrawTraits(); },
-                }, "Delete"),
-              );
-              traitBox.appendChild(h("div", { class: "trait-row" },
-                field("Trait type", typeSelect), field("Target", keySelect), valueControl, controls));
-            });
-            if (!e.traits.length) {
-              traitBox.appendChild(h("div", { class: "dim trait-empty" }, "No traits. This class uses the engine's normal rules."));
-            }
-            traitBox.appendChild(h("button", {
-              class: "mini trait-add",
-              onclick() { e.traits.push(traitDefault("param")); touch(); redrawTraits(); },
-            }, "+ Add trait"));
-          }
-          redrawTraits();
-          box.appendChild(h("div", { class: "subhead" }, "Traits"));
-          box.appendChild(h("div", { class: "dim" },
-            "Rates use 100% as normal, 50% as half, and 0% as immunity. Multiple matching rates multiply. Equipment permissions become a whitelist for that slot."));
-          box.appendChild(traitBox);
-          // learnings
-          const lbox = h("div", { class: "minilist" });
-          function redrawL() {
-            lbox.innerHTML = "";
-            (e.learnings || []).forEach((l, i) => {
-              lbox.appendChild(h("div", { class: "minirow" },
-                h("span", null, "Lv"), nIn(l, "level", 1, 99), sel(l, "skillId", dbOpts(proj.skills)),
-                h("button", { class: "mini", onclick() { e.learnings.splice(i, 1); touch(); redrawL(); } }, "✕")));
-            });
-            lbox.appendChild(h("button", { class: "mini", onclick() {
-              e.learnings = e.learnings || [];
-              e.learnings.push({ level: 1, skillId: proj.skills[0] ? proj.skills[0].id : 1 });
-              touch(); redrawL();
-            } }, "+ add skill"));
-          }
-          redrawL();
-          box.appendChild(h("div", { class: "subhead" }, "Skills learned"));
-          box.appendChild(lbox);
-        },
-      }) },
-      { label: "Skills", build: () => listFormTab({
-        list: () => proj.skills,
-        blank: () => ({ id: 0, name: "Skill", icon: 8, type: "magic", power: 20, mp: 5, scope: "enemy", color: "#f07030", stateId: 0, stateOp: "add", stateChance: 100 }),
-        form(e, box, redrawList) {
-          if (!e.element) e.element = RA.elementOfSkill(e);
-          box.appendChild(row(field("Name", nameRefresher(e, redrawList)), iconPickerField(e, redrawList),
-            field("Type", sel(e, "type", skillTypeSelOpts())),
-            field("Element", sel(e, "element", elementSelOpts())),
-            field("Power", nIn(e, "power", 0, 9999)), field("MP cost", nIn(e, "mp", 0, 999))));
-          box.appendChild(field("Scope", sel(e, "scope", [
-            { v: "enemy", l: "One enemy" }, { v: "enemies", l: "All enemies" },
-            { v: "ally", l: "One ally" }, { v: "allies", l: "All allies" }])));
-          if (e.stateId == null) e.stateId = 0;
-          if (!e.stateOp) e.stateOp = "add";
-          if (e.stateChance == null) e.stateChance = 100;
-          box.appendChild(h("div", { class: "subhead" }, "State effect (optional)"));
-          box.appendChild(row(field("Effect", sel(e, "stateOp", [{ v: "add", l: "Add state" }, { v: "remove", l: "Remove state" }])),
-            field("State", sel(e, "stateId", dbOpts(proj.states, "(none)"))),
-            field("Chance %", nIn(e, "stateChance", 0, 100))));
-          box.appendChild(h("div", { class: "dim" }, "Damage: physical = power + 2·ATK − 1.2·DEF · magical = power + 2·MAT − 1.5·MDF · heal = power + 1.2·MAT. The state effect rolls per target hit (see the States tab)."));
-        },
-      }) },
-      { label: "Items", build: () => listFormTab({
-        list: () => proj.items,
-        blank: () => ({ id: 0, name: "Item", icon: 24, price: 50, hp: 50, mp: 0, desc: "" }),
-        form(e, box, redrawList) {
-          box.appendChild(row(field("Name", nameRefresher(e, redrawList)), iconPickerField(e, redrawList), field("Price", nIn(e, "price", 0))));
-          box.appendChild(row(field("Restores HP", nIn(e, "hp", 0, 9999)), field("Restores MP", nIn(e, "mp", 0, 9999))));
-          box.appendChild(field("Description", tIn(e, "desc")));
-        },
-      }) },
-      { label: "Weapons", build: () => listFormTab({
-        list: () => proj.weapons,
-        blank: () => ({ id: 0, name: "Weapon", icon: 48, price: 100, wtypeId: 1, params: { atk: 5 } }),
-        form(e, box, redrawList) {
-          e.params = e.params || {};
-          box.appendChild(row(field("Name", nameRefresher(e, redrawList)), iconPickerField(e, redrawList),
-            field("Type", sel(e, "wtypeId", typeSelOpts("weaponTypes"))), field("Price", nIn(e, "price", 0))));
-          const pr = h("div", { class: "frow" });
-          for (const k of PARAM_KEYS) { if (e.params[k] == null) e.params[k] = 0; pr.appendChild(field(k.toUpperCase() + " +", nIn(e.params, k, -999, 999))); }
-          box.appendChild(pr);
-        },
-      }) },
-      { label: "Armors", build: () => listFormTab({
-        list: () => proj.armors,
-        blank: () => ({ id: 0, name: "Armor", icon: 56, price: 80, atypeId: 1, etypeId: 4, params: { def: 4 } }),
-        form(e, box, redrawList) {
-          e.params = e.params || {};
-          box.appendChild(row(field("Name", nameRefresher(e, redrawList)), iconPickerField(e, redrawList), field("Price", nIn(e, "price", 0))));
-          box.appendChild(row(field("Type", sel(e, "atypeId", typeSelOpts("armorTypes"))),
-            field("Equip slot", sel(e, "etypeId", typeSelOpts("equipTypes")))));
-          const pr = h("div", { class: "frow" });
-          for (const k of PARAM_KEYS) { if (e.params[k] == null) e.params[k] = 0; pr.appendChild(field(k.toUpperCase() + " +", nIn(e.params, k, -999, 999))); }
-          box.appendChild(pr);
-        },
-      }) },
-      { label: "Enemies", build: () => listFormTab({
-        list: () => proj.enemies,
-        blank: () => ({ id: 0, name: "Enemy", sprite: "slime", color: "#5aa84f",
-          stats: { mhp: 30, atk: 10, def: 6, mat: 5, mdf: 5, agi: 6 }, exp: 10, gold: 10, actions: [{ skillId: 0, weight: 5 }] }),
-        form(e, box, redrawList) {
-          const preview = h("span", { class: "enemy-preview" });
-          function rp() {
-            preview.innerHTML = "";
-            preview.appendChild(Assets.enemyCanvas(e.sprite, e.color, 96));
-          }
-          const colorIn = h("input", { type: "color", value: e.color || "#5aa84f", oninput(ev2) { e.color = ev2.target.value; touch(); rp(); } });
-          box.appendChild(row(field("Name", nameRefresher(e, redrawList)),
-            field("Sprite", sel(e, "sprite", Assets.ENEMY_TYPES.map((t) => ({ v: t, l: Assets.assetLabel(t) })), rp)),
-            field("Color", colorIn), preview));
-          const st = h("div", { class: "frow" });
-          for (const k of ["mhp", "atk", "def", "mat", "mdf", "agi"]) st.appendChild(field(k.toUpperCase(), nIn(e.stats, k, 0, 99999)));
-          box.appendChild(st);
-          box.appendChild(row(field("EXP reward", nIn(e, "exp", 0)), field("Gold reward", nIn(e, "gold", 0))));
-          const abox = h("div", { class: "minilist" });
-          function redrawA() {
-            abox.innerHTML = "";
-            (e.actions || []).forEach((a, i) => {
-              abox.appendChild(h("div", { class: "minirow" },
-                sel(a, "skillId", [{ v: 0, l: "(basic attack)" }].concat(dbOpts(proj.skills))),
-                h("span", null, "weight"), nIn(a, "weight", 1, 99),
-                h("button", { class: "mini", onclick() { e.actions.splice(i, 1); touch(); redrawA(); } }, "✕")));
-            });
-            abox.appendChild(h("button", { class: "mini", onclick() {
-              e.actions = e.actions || [];
-              e.actions.push({ skillId: 0, weight: 1 });
-              touch(); redrawA();
-            } }, "+ add action"));
-          }
-          redrawA();
-          box.appendChild(h("div", { class: "subhead" }, "Actions (picked by weight)"));
-          box.appendChild(abox);
-          rp();
-        },
-      }) },
-      { label: "Troops", build: () => listFormTab({
-        list: () => proj.troops,
-        blank: () => ({ id: 0, name: "Troop", enemies: [] }),
-        form(e, box, redrawList) {
-          box.appendChild(field("Name", nameRefresher(e, redrawList)));
-          const mbox = h("div", { class: "frow" });
-          function redrawM() {
-            mbox.innerHTML = "";
-            for (let i = 0; i < 4; i++) {
-              const slot = { v: e.enemies[i] || 0 };
-              mbox.appendChild(field("Slot " + (i + 1), sel(slot, "v", dbOpts(proj.enemies, "(empty)"), () => {
-                const arr = [];
-                const slots = mbox.querySelectorAll("select");
-                slots.forEach((s2) => { const v = Number(s2.value); if (v) arr.push(v); });
-                e.enemies = arr;
-                touch();
-              })));
-            }
-          }
-          redrawM();
-          box.appendChild(h("div", { class: "subhead" }, "Members (up to 4)"));
-          box.appendChild(mbox);
-        },
-      }) },
-      { label: "Quests", build: () => listFormTab({
-        list: () => proj.quests,
-        allowEmpty: true,
-        reorderable: true,
-        blank: () => ({
-          id: 0,
-          name: "Quest",
-          shortDesc: "",
-          desc: "",
-          category: "side",
-          visible: true,
-          objectives: [],
-          startReqs: [],
-          failConditions: [],
-          rewards: [],
-          failEffects: [],
-          failText: "",
-          nextQuestIds: [],
-          autoStartNext: false,
-          allowRestartOnFail: false,
-          canAbandon: false,
-        }),
-        form(e, box, redrawList) {
-          if (!e.name) e.name = "Quest";
-          if (e.shortDesc == null) e.shortDesc = "";
-          if (e.desc == null) e.desc = "";
-          if (!Array.isArray(e.objectives)) e.objectives = [];
-          if (!Array.isArray(e.rewards)) e.rewards = [];
-          if (!Array.isArray(e.startReqs)) e.startReqs = [];
-          if (!Array.isArray(e.failConditions)) e.failConditions = [];
-          if (!Array.isArray(e.failEffects)) e.failEffects = [];
-          if (!Array.isArray(e.nextQuestIds)) e.nextQuestIds = [];
-          if (!e.category) e.category = "side";
-          if (e.visible == null) e.visible = true;
-          if (e.autoStartNext == null) e.autoStartNext = false;
-          if (e.failText == null) e.failText = "";
-          if (e.allowRestartOnFail == null) e.allowRestartOnFail = false;
-          if (e.canAbandon == null) e.canAbandon = false;
-
-          function effectEditor(list, title, addLabel, blank, kinds) {
-            const panel = h("div", { class: "minilist" });
-            function redraw() {
-              panel.innerHTML = "";
-              list.forEach((rw, i) => {
-                if (!rw.kind) rw.kind = kinds[0].v;
-                const rowEl = h("div", { class: "minirow" });
-                rowEl.appendChild(sel(rw, "kind", kinds, redraw));
-                if (rw.kind === "item") {
-                  if (!rw.itemKind) rw.itemKind = "item";
-                  const entryWrap = h("span");
-                  const redrawEntry = () => {
-                    const arr = rw.itemKind === "weapon" ? proj.weapons : rw.itemKind === "armor" ? proj.armors : proj.items;
-                    if (!arr.some((it) => it.id === Number(rw.id))) rw.id = arr[0] ? arr[0].id : 0;
-                    entryWrap.innerHTML = "";
-                    entryWrap.appendChild(sel(rw, "id", dbOpts(arr, "(none)")));
-                  };
-                  rowEl.appendChild(sel(rw, "itemKind", [
-                    { v: "item", l: "Item" },
-                    { v: "weapon", l: "Weapon" },
-                    { v: "armor", l: "Armor" },
-                  ], redrawEntry));
-                  redrawEntry();
-                  rowEl.appendChild(entryWrap);
-                  rowEl.appendChild(nIn(rw, "count", 1, 99));
-                } else if (rw.kind === "switch") {
-                  rowEl.appendChild(sel(rw, "id", switchOpts()));
-                  rowEl.appendChild(sel(rw, "val", [{ v: "true", l: "ON" }, { v: "false", l: "OFF" }]));
-                } else if (rw.kind === "var") {
-                  rowEl.appendChild(sel(rw, "id", varOpts()));
-                  rowEl.appendChild(sel(rw, "op", [{ v: "set", l: "Set" }, { v: "add", l: "Add" }, { v: "sub", l: "Sub" }]));
-                  rowEl.appendChild(nIn(rw, "amount", -9999999, 9999999));
-                } else if (rw.kind === "questUnlock" || rw.kind === "questLock") {
-                  rowEl.appendChild(sel(rw, "questId", dbOpts(proj.quests, "(none)")));
-                } else {
-                  rowEl.appendChild(nIn(rw, "amount", 0, 9999999));
-                }
-                rowEl.appendChild(h("button", { class: "mini", onclick() { list.splice(i, 1); touch(); redraw(); } }, "✕"));
-                panel.appendChild(rowEl);
-              });
-              panel.appendChild(h("button", { class: "mini", onclick() {
-                list.push(blank());
-                touch(); redraw();
-              } }, addLabel));
-            }
-            redraw();
-            box.appendChild(h("div", { class: "subhead" }, title));
-            box.appendChild(panel);
-          }
-          function failConditionEditor() {
-            const panel = h("div", { class: "minilist" });
-            function redraw() {
-              panel.innerHTML = "";
-              e.failConditions.forEach((fc, i) => {
-                if (!fc.kind) fc.kind = "manual";
-                const rowEl = h("div", { class: "minirow", style: "align-items:flex-start; flex-wrap:wrap" });
-                rowEl.appendChild(field("Type", sel(fc, "kind", stringSelOpts(["manual", "switch", "var", "battleLose", "enemyDefeatCount"]), redraw)));
-                if (fc.kind === "switch") {
-                  rowEl.appendChild(field("Switch", sel(fc, "id", switchOpts())));
-                  rowEl.appendChild(field("State", sel(fc, "val", [{ v: "true", l: "ON" }, { v: "false", l: "OFF" }])));
-                } else if (fc.kind === "var") {
-                  rowEl.appendChild(field("Variable", sel(fc, "id", varOpts())));
-                  rowEl.appendChild(field("Cmp", sel(fc, "cmp", [{ v: ">=", l: "≥" }, { v: "==", l: "=" }, { v: "<=", l: "≤" }])));
-                  rowEl.appendChild(field("Value", nIn(fc, "val", -9999999, 9999999)));
-                } else if (fc.kind === "battleLose") {
-                  rowEl.appendChild(field("Troop", sel(fc, "troopId", dbOpts(proj.troops, "(none)"))));
-                } else if (fc.kind === "enemyDefeatCount") {
-                  rowEl.appendChild(field("Enemy", sel(fc, "enemyId", dbOpts(proj.enemies, "(none)"))));
-                  rowEl.appendChild(field("Losses", nIn(fc, "count", 1, 99)));
-                } else {
-                  rowEl.appendChild(h("div", { class: "dim" }, "Manual fail only — use the Fail Quest command."));
-                }
-                rowEl.appendChild(h("button", { class: "mini", onclick() { e.failConditions.splice(i, 1); touch(); redraw(); } }, "✕"));
-                panel.appendChild(rowEl);
-              });
-              panel.appendChild(h("button", { class: "mini", onclick() {
-                e.failConditions.push({ kind: "manual" });
-                touch(); redraw();
-              } }, "+ add fail condition"));
-            }
-            redraw();
-            box.appendChild(h("div", { class: "subhead" }, "Fail conditions"));
-            box.appendChild(panel);
-          }
-
-          function requirementEditor() {
-            const panel = h("div", { class: "minilist" });
-            function redraw() {
-              panel.innerHTML = "";
-              e.startReqs.forEach((rq, i) => {
-                if (!rq.kind) rq.kind = "quest";
-                const rowEl = h("div", { class: "minirow" });
-                rowEl.appendChild(sel(rq, "kind", [
-                  { v: "quest", l: "Quest state" },
-                  { v: "switch", l: "Switch" },
-                  { v: "var", l: "Variable" },
-                ], redraw));
-                if (rq.kind === "quest") {
-                  const questOpts = [{ v: 0, l: "(none)" }].concat(proj.quests.filter((q) => q !== e).map((q) => ({ v: q.id, l: q.id + ": " + (q.name || "Quest") })));
-                  rowEl.appendChild(sel(rq, "questId", questOpts));
-                  rowEl.appendChild(sel(rq, "status", stringSelOpts(["active", "completed", "failed", "abandoned"])));
-                } else if (rq.kind === "switch") {
-                  rowEl.appendChild(sel(rq, "id", switchOpts()));
-                  rowEl.appendChild(sel(rq, "val", [{ v: "true", l: "ON" }, { v: "false", l: "OFF" }]));
-                } else {
-                  rowEl.appendChild(sel(rq, "id", varOpts()));
-                  rowEl.appendChild(sel(rq, "cmp", [{ v: ">=", l: "≥" }, { v: "==", l: "=" }, { v: "<=", l: "≤" }]));
-                  rowEl.appendChild(nIn(rq, "val", -9999999, 9999999));
-                }
-                rowEl.appendChild(h("button", { class: "mini", onclick() { e.startReqs.splice(i, 1); touch(); redraw(); } }, "✕"));
-                panel.appendChild(rowEl);
-              });
-              panel.appendChild(h("button", { class: "mini", onclick() {
-                e.startReqs.push({ kind: "quest", questId: 0, status: "completed" });
-                touch(); redraw();
-              } }, "+ add requirement"));
-            }
-            redraw();
-            box.appendChild(h("div", { class: "subhead" }, "Availability / start requirements"));
-            box.appendChild(panel);
-          }
-          function objectiveEditor() {
-            const panel = h("div", { class: "minilist" });
-            function redraw() {
-              panel.innerHTML = "";
-              e.objectives.forEach((obj, i) => {
-                if (!obj.kind) obj.kind = "event";
-                if (!obj.label) obj.label = "";
-                if (obj.count == null) obj.count = 1;
-                const rowEl = h("div", { class: "minirow", style: "align-items:flex-start; flex-wrap:wrap" });
-                rowEl.appendChild(field("Type", sel(obj, "kind", stringSelOpts(["event", "kill", "fetch"]), redraw)));
-                rowEl.appendChild(field("Label", tIn(obj, "label")));
-                rowEl.appendChild(field("Count", nIn(obj, "count", 1, 999)));
-                if (obj.kind === "kill") {
-                  rowEl.appendChild(field("Enemy", sel(obj, "enemyId", dbOpts(proj.enemies, "(none)"))));
-                } else if (obj.kind === "fetch") {
-                  const itemWrap = h("span");
-                  const eventWrap = h("span");
-                  const redrawItem = () => {
-                    const arr = obj.itemKind === "weapon" ? proj.weapons : obj.itemKind === "armor" ? proj.armors : proj.items;
-                    if (!arr.some((it) => it.id === Number(obj.id))) obj.id = arr[0] ? arr[0].id : 0;
-                    itemWrap.innerHTML = "";
-                    itemWrap.appendChild(sel(obj, "id", dbOpts(arr, "(none)")));
-                  };
-                  const redrawEvent = () => {
-                    const map = RA.byId(proj.maps, obj.targetMapId);
-                    const eventOpts = [{ v: 0, l: "(any)" }].concat((map || { events: [] }).events.map((ev2) => ({ v: ev2.id, l: ev2.id + ": " + ev2.name })));
-                    eventWrap.innerHTML = "";
-                    eventWrap.appendChild(sel(obj, "targetEventId", eventOpts));
-                  };
-                  if (!obj.itemKind) obj.itemKind = "item";
-                  rowEl.appendChild(field("Kind", sel(obj, "itemKind", [
-                    { v: "item", l: "Item" },
-                    { v: "weapon", l: "Weapon" },
-                    { v: "armor", l: "Armor" },
-                  ], redrawItem)));
-                  redrawItem();
-                  rowEl.appendChild(field("Entry", itemWrap));
-                  rowEl.appendChild(field("Turn-in map", sel(obj, "targetMapId", dbOpts(proj.maps, "(any)"), redrawEvent)));
-                  redrawEvent();
-                  rowEl.appendChild(field("Turn-in event", eventWrap));
-                  rowEl.appendChild(field("Consume on complete", chk(obj, "consumeOnComplete")));
-                }
-                rowEl.appendChild(h("button", { class: "mini", onclick() { e.objectives.splice(i, 1); touch(); redraw(); } }, "✕"));
-                panel.appendChild(rowEl);
-              });
-              panel.appendChild(h("div", { class: "minirow" },
-                h("button", { class: "mini", onclick() { e.objectives.push({ kind: "event", label: "Talk to target", count: 1 }); touch(); redraw(); } }, "+ Event objective"),
-                h("button", { class: "mini", onclick() { e.objectives.push({ kind: "kill", label: "Defeat target enemies", enemyId: proj.enemies[0] ? proj.enemies[0].id : 0, count: 3 }); touch(); redraw(); } }, "+ Kill objective"),
-                h("button", { class: "mini", onclick() { e.objectives.push({ kind: "fetch", label: "Bring requested item", itemKind: "item", id: proj.items[0] ? proj.items[0].id : 0, count: 1, targetMapId: 0, targetEventId: 0, consumeOnComplete: false }); touch(); redraw(); } }, "+ Fetch objective")));
-            }
-            redraw();
-            box.appendChild(h("div", { class: "subhead" }, "Objectives"));
-            box.appendChild(panel);
-          }
-
-          box.appendChild(row(field("Title", nameRefresher(e, redrawList)),
-            field("Category", sel(e, "category", stringSelOpts(["main", "side", "guild", "hidden"]))),
-            field("Visible in journal", chk(e, "visible"))));
-          const shortDesc = h("input", { type: "text", value: e.shortDesc || "", oninput(ev) { e.shortDesc = ev.target.value; touch(); } });
-          const desc = h("textarea", { rows: 5, oninput(ev) { e.desc = ev.target.value; touch(); } }, e.desc || "");
-          box.appendChild(field("Short description", shortDesc));
-          box.appendChild(field("Long description", desc));
-
-          objectiveEditor();
-          requirementEditor();
-          failConditionEditor();
-
-          effectEditor(e.rewards, "Rewards", "+ add reward", () => ({ kind: "gold", amount: 100 }), [
-            { v: "exp", l: "XP" },
-            { v: "gold", l: "Money" },
-            { v: "item", l: "Item" },
-          ]);
-
-          effectEditor(e.failEffects, "Fail effects", "+ add fail effect", () => ({ kind: "switch", id: 1, val: "true" }), [
-            { v: "gold", l: "Money" },
-            { v: "item", l: "Item" },
-            { v: "switch", l: "Switch" },
-            { v: "var", l: "Variable" },
-            { v: "questUnlock", l: "Unlock quest" },
-            { v: "questLock", l: "Lock quest" },
-          ]);
-          box.appendChild(field("Failure / consequence text", h("textarea", { rows: 3, oninput(ev) { e.failText = ev.target.value; touch(); } }, e.failText || "")));
-
-          const nextBox = h("div", { class: "minilist" });
-          function redrawNext() {
-            nextBox.innerHTML = "";
-            e.nextQuestIds.forEach((id, i) => {
-              const slot = { id };
-              const options = [{ v: 0, l: "(none)" }].concat(proj.quests.filter((q) => q !== e).map((q) => ({ v: q.id, l: q.id + ": " + (q.name || "Quest") })));
-              nextBox.appendChild(h("div", { class: "minirow" },
-                sel(slot, "id", options, () => {
-                  e.nextQuestIds[i] = slot.id;
-                  e.nextQuestIds = e.nextQuestIds.filter((qid) => qid && qid !== e.id);
+      {
+        label: "System",
+        build() {
+          const s = proj.system;
+          const box = h("div", { class: "dbform single" });
+          box.appendChild(field("Game title", tIn(s, "title")));
+          box.appendChild(
+            row(
+              field("Start map", sel(s, "startMapId", dbOpts(proj.maps))),
+              field("X", nIn(s, "startX", 0, 200)),
+              field("Y", nIn(s, "startY", 0, 200)),
+              field("Facing", sel(s, "startDir", DIR_OPTS)),
+              field("Start transparent", chk(s, "startTransparent")),
+            ),
+          );
+          box.appendChild(
+            h(
+              "div",
+              { class: "dim" },
+              "Tip: use the “Start” mode button and click the map to set this visually. A transparent player is invisible until an event runs “Change Transparency” — handy for intro cutscenes.",
+            ),
+          );
+          const partyRow = h("div");
+          for (let i = 0; i < 4; i++) {
+            const slot = { v: s.party[i] || 0 };
+            partyRow.appendChild(
+              field(
+                "Member " + (i + 1),
+                sel(slot, "v", dbOpts(proj.actors, "(empty)"), () => {
+                  s.party[i] = slot.v || undefined;
+                  s.party = s.party.filter(Boolean);
                   touch();
                 }),
-                h("button", { class: "mini", onclick() { e.nextQuestIds.splice(i, 1); touch(); redrawNext(); } }, "✕")));
-            });
-            nextBox.appendChild(h("button", { class: "mini", onclick() {
-              const candidate = proj.quests.find((q) => q !== e && !e.nextQuestIds.includes(q.id));
-              if (!candidate) return;
-              e.nextQuestIds.push(candidate.id);
-              touch(); redrawNext();
-            } }, "+ add next quest"));
+              ),
+            );
           }
-          redrawNext();
-          box.appendChild(h("div", { class: "subhead" }, "Next quests"));
-          box.appendChild(nextBox);
-          box.appendChild(field("Auto-start next quests", chk(e, "autoStartNext")));
-          box.appendChild(row(field("Allow restart after fail", chk(e, "allowRestartOnFail")), field("Player can abandon", chk(e, "canAbandon"))));
+          box.appendChild(h("div", { class: "subhead" }, "Starting party"));
+          box.appendChild(h("div", { class: "frow" }, partyRow));
+          box.appendChild(
+            row(
+              field("Starting gold", nIn(s, "startGold", 0)),
+              field("Currency name", tIn(s, "currency")),
+              field(
+                "Battle view",
+                sel(s, "battleView", [
+                  { v: "side", l: "Side view (party sprites)" },
+                  { v: "front", l: "Front view (classic)" },
+                ]),
+              ),
+            ),
+          );
+
+          box.appendChild(h("div", { class: "subhead" }, "Screen"));
+          box.appendChild(
+            row(
+              field("Game width (px)", nIn(s, "screenWidth", 384, 3840)),
+              field("Game height (px)", nIn(s, "screenHeight", 288, 2160)),
+              field(
+                "Screen scale (max zoom)",
+                nIn(s, "screenScale", 0.5, 4, 0.1),
+              ),
+            ),
+          );
+          box.appendChild(
+            row(
+              field("UI area width (0 = full)", nIn(s, "uiWidth", 0, 3840)),
+              field("UI area height (0 = full)", nIn(s, "uiHeight", 0, 2160)),
+            ),
+          );
+          box.appendChild(
+            h(
+              "div",
+              { class: "dim" },
+              "The UI area centres message windows and menus inside the game screen — useful on very wide screens. Changes apply on the next playtest.",
+            ),
+          );
+
+          box.appendChild(h("div", { class: "subhead" }, "Windows & fonts"));
+          const fontOpts = RA.FONTS.slice();
+          fontOpts.stringValues = true;
+          box.appendChild(
+            row(
+              field("Message font", sel(s, "fontText", fontOpts)),
+              field("Menu font", sel(s, "fontMenu", fontOpts)),
+            ),
+          );
+          box.appendChild(
+            row(
+              field("Font size (px)", nIn(s, "fontSize", 8, 48)),
+              field("Window opacity", rangeIn(s, "windowOpacity", 0, 100, "%")),
+            ),
+          );
+
+          box.appendChild(h("div", { class: "subhead" }, "System sounds"));
+          const seOpts = SE_NAMES.map((n) => ({ v: n, l: n }));
+          seOpts.stringValues = true;
+          const sgrid = h("div", { class: "sysgrid" });
+          for (const def of RA.SYSTEM_SOUNDS) {
+            sgrid.appendChild(
+              field(
+                def.label,
+                h(
+                  "span",
+                  { class: "frow", style: "gap:4px; flex-wrap:nowrap" },
+                  sel(s.sounds, def.key, seOpts),
+                  h(
+                    "button",
+                    {
+                      class: "mini",
+                      onclick() {
+                        Sfx.play(s.sounds[def.key] || def.def);
+                      },
+                    },
+                    "▶",
+                  ),
+                ),
+              ),
+            );
+          }
+          box.appendChild(sgrid);
+
+          box.appendChild(h("div", { class: "subhead" }, "System music"));
+          box.appendChild(
+            row(
+              field("Title theme", sel(s.music, "title", MUSIC_OPTS())),
+              field("Battle theme", sel(s.music, "battle", MUSIC_OPTS())),
+            ),
+          );
+          return box;
         },
-      }) },
-      { label: "States", build: () => listFormTab({
-        list: () => proj.states,
-        blank: () => ({ id: 0, name: "State", icon: 12, color: "#a050d8", restrict: "none", hpTurn: 0, minTurns: 2, maxTurns: 4, removeAtEnd: true }),
-        form(e, box, redrawList) {
-          const colorIn = h("input", { type: "color", value: e.color || "#a050d8", oninput(ev2) { e.color = ev2.target.value; touch(); } });
-          box.appendChild(row(field("Name", nameRefresher(e, redrawList)), iconPickerField(e, redrawList), field("Color", colorIn)));
-          box.appendChild(row(field("Restriction", sel(e, "restrict", [{ v: "none", l: "None" }, { v: "act", l: "Cannot act" }])),
-            field("HP per turn %", nIn(e, "hpTurn", -100, 100)),
-            field("Min turns", nIn(e, "minTurns", 1, 99)), field("Max turns", nIn(e, "maxTurns", 1, 99)),
-            field("Removed after battle", chk(e, "removeAtEnd"))));
-          box.appendChild(h("div", { class: "dim" }, "Negative HP per turn deals damage each round (poison); positive restores (regen). “Cannot act” makes the battler skip its turns (stun). States are inflicted or cured by skills — set that on the Skills tab. Full recovery cures all states."));
-        },
-      }) },
+      },
+      {
+        label: "Actors",
+        build: () =>
+          listFormTab({
+            list: () => proj.actors,
+            blank: () => ({
+              id: 0,
+              name: "Actor",
+              classId: proj.classes[0].id,
+              level: 1,
+              charset: "hero",
+              weaponId: 0,
+              armorId: 0,
+            }),
+            form(e, box, redrawList) {
+              const preview = h("span", { class: "char-preview" });
+              function rp() {
+                preview.innerHTML = "";
+                const ci = Assets.charsetIndex(e.charset);
+                if (ci >= 0) {
+                  preview.appendChild(Assets.faceCanvas(ci));
+                }
+              }
+              box.appendChild(
+                row(
+                  field("Name", nameRefresher(e, redrawList)),
+                  field("Class", sel(e, "classId", dbOpts(proj.classes))),
+                  field("Initial level", nIn(e, "level", 1, 99)),
+                ),
+              );
+              box.appendChild(
+                row(
+                  field("Sprite", sel(e, "charset", charsetOpts(true), rp)),
+                  preview,
+                ),
+              );
+              box.appendChild(
+                row(
+                  field(
+                    "Initial weapon",
+                    sel(e, "weaponId", dbOpts(proj.weapons, "(none)")),
+                  ),
+                  field(
+                    "Initial armor",
+                    sel(e, "armorId", dbOpts(proj.armors, "(none)")),
+                  ),
+                ),
+              );
+              rp();
+            },
+          }),
+      },
+      {
+        label: "Classes",
+        build: () =>
+          listFormTab({
+            list: () => proj.classes,
+            blank: () => ({
+              id: 0,
+              name: "Class",
+              icon: 0,
+              base: {
+                mhp: 40,
+                mmp: 12,
+                atk: 10,
+                def: 9,
+                mat: 8,
+                mdf: 8,
+                agi: 8,
+              },
+              growth: {
+                mhp: 7,
+                mmp: 2,
+                atk: 2,
+                def: 1.8,
+                mat: 1.8,
+                mdf: 1.8,
+                agi: 1.5,
+              },
+              traits: [],
+              learnings: [],
+            }),
+            form(e, box, redrawList) {
+              box.appendChild(
+                row(
+                  field("Name", nameRefresher(e, redrawList)),
+                  iconPickerField(e, redrawList),
+                ),
+              );
+              const bRow = h("div", { class: "frow" }),
+                gRow = h("div", { class: "frow" });
+              for (const k of STAT_KEYS)
+                bRow.appendChild(
+                  field(k.toUpperCase(), nIn(e.base, k, 0, 9999)),
+                );
+              for (const k of STAT_KEYS)
+                gRow.appendChild(
+                  field(
+                    "+" + k.toUpperCase() + "/lv",
+                    nIn(e.growth, k, 0, 999, 0.1),
+                  ),
+                );
+              box.appendChild(
+                h("div", { class: "subhead" }, "Base stats (level 1)"),
+              );
+              box.appendChild(bRow);
+              box.appendChild(
+                h("div", { class: "subhead" }, "Growth per level"),
+              );
+              box.appendChild(gRow);
+              // traits
+              e.traits = Array.isArray(e.traits) ? e.traits : [];
+              const traitBox = h("div", { class: "trait-list" });
+              function traitKeyOptions(t) {
+                if (t.type === "param") {
+                  const opts = STAT_KEYS.map((k) => ({
+                    v: k,
+                    l: k.toUpperCase(),
+                  }));
+                  opts.stringValues = true;
+                  return opts;
+                }
+                if (t.type === "element") {
+                  return elementSelOpts();
+                }
+                if (t.type === "state") {
+                  const opts = dbOpts(proj.states);
+                  opts.stringValues = true;
+                  return opts;
+                }
+                if (t.type === "skill") {
+                  return skillTypeTraitOpts();
+                }
+                if (t.type === "equip") {
+                  const opts = [
+                    { v: "weapon", l: "Weapon" },
+                    { v: "armor", l: "Armor" },
+                  ];
+                  opts.stringValues = true;
+                  return opts;
+                }
+                const opts = RA.TRAIT_SPECIALS.slice();
+                opts.stringValues = true;
+                return opts;
+              }
+              function traitValueLabel(t) {
+                if (t.type === "param") return "Stat rate %";
+                if (t.type === "element") return "Damage taken %";
+                if (t.type === "state") return "Infliction chance %";
+                if (t.type === "skill") return "Power rate %";
+                return "Value %";
+              }
+              function redrawTraits() {
+                traitBox.innerHTML = "";
+                e.traits.forEach((t, i) => {
+                  const typeOpts = RA.TRAIT_TYPES.slice();
+                  typeOpts.stringValues = true;
+                  const typeSelect = sel(t, "type", typeOpts, (type) => {
+                    Object.assign(t, traitDefault(type));
+                    redrawTraits();
+                  });
+                  const keySelect = sel(t, "key", traitKeyOptions(t), () => {
+                    if (t.type === "equip") {
+                      const db = t.key === "armor" ? proj.armors : proj.weapons;
+                      if (!db.some((item) => item.id === Number(t.value)))
+                        t.value = db[0] ? db[0].id : 0;
+                      redrawTraits();
+                    }
+                  });
+                  let valueControl;
+                  if (t.type === "equip") {
+                    const db = t.key === "armor" ? proj.armors : proj.weapons;
+                    valueControl = field(
+                      "Allowed item",
+                      sel(t, "value", dbOpts(db, "(none)")),
+                    );
+                  } else {
+                    const max =
+                      t.type === "special" && t.key === "critChance"
+                        ? 100
+                        : 999;
+                    valueControl = field(
+                      traitValueLabel(t),
+                      nIn(t, "value", 0, max),
+                    );
+                  }
+                  const controls = h(
+                    "div",
+                    { class: "trait-actions" },
+                    h(
+                      "button",
+                      {
+                        class: "mini",
+                        title: "Move trait up",
+                        "aria-label": "Move trait up",
+                        ...(i === 0 ? { disabled: "" } : {}),
+                        onclick() {
+                          if (i <= 0) return;
+                          const [moved] = e.traits.splice(i, 1);
+                          e.traits.splice(i - 1, 0, moved);
+                          touch();
+                          redrawTraits();
+                        },
+                      },
+                      "↑",
+                    ),
+                    h(
+                      "button",
+                      {
+                        class: "mini",
+                        title: "Move trait down",
+                        "aria-label": "Move trait down",
+                        ...(i === e.traits.length - 1 ? { disabled: "" } : {}),
+                        onclick() {
+                          if (i >= e.traits.length - 1) return;
+                          const [moved] = e.traits.splice(i, 1);
+                          e.traits.splice(i + 1, 0, moved);
+                          touch();
+                          redrawTraits();
+                        },
+                      },
+                      "↓",
+                    ),
+                    h(
+                      "button",
+                      {
+                        class: "mini danger",
+                        title: "Delete trait",
+                        "aria-label": "Delete trait",
+                        onclick() {
+                          e.traits.splice(i, 1);
+                          touch();
+                          redrawTraits();
+                        },
+                      },
+                      "Delete",
+                    ),
+                  );
+                  traitBox.appendChild(
+                    h(
+                      "div",
+                      { class: "trait-row" },
+                      field("Trait type", typeSelect),
+                      field("Target", keySelect),
+                      valueControl,
+                      controls,
+                    ),
+                  );
+                });
+                if (!e.traits.length) {
+                  traitBox.appendChild(
+                    h(
+                      "div",
+                      { class: "dim trait-empty" },
+                      "No traits. This class uses the engine's normal rules.",
+                    ),
+                  );
+                }
+                traitBox.appendChild(
+                  h(
+                    "button",
+                    {
+                      class: "mini trait-add",
+                      onclick() {
+                        e.traits.push(traitDefault("param"));
+                        touch();
+                        redrawTraits();
+                      },
+                    },
+                    "+ Add trait",
+                  ),
+                );
+              }
+              redrawTraits();
+              box.appendChild(h("div", { class: "subhead" }, "Traits"));
+              box.appendChild(
+                h(
+                  "div",
+                  { class: "dim" },
+                  "Rates use 100% as normal, 50% as half, and 0% as immunity. Multiple matching rates multiply. Equipment permissions become a whitelist for that slot.",
+                ),
+              );
+              box.appendChild(traitBox);
+              // learnings
+              const lbox = h("div", { class: "minilist" });
+              function redrawL() {
+                lbox.innerHTML = "";
+                (e.learnings || []).forEach((l, i) => {
+                  lbox.appendChild(
+                    h(
+                      "div",
+                      { class: "minirow" },
+                      h("span", null, "Lv"),
+                      nIn(l, "level", 1, 99),
+                      sel(l, "skillId", dbOpts(proj.skills)),
+                      h(
+                        "button",
+                        {
+                          class: "mini",
+                          onclick() {
+                            e.learnings.splice(i, 1);
+                            touch();
+                            redrawL();
+                          },
+                        },
+                        "✕",
+                      ),
+                    ),
+                  );
+                });
+                lbox.appendChild(
+                  h(
+                    "button",
+                    {
+                      class: "mini",
+                      onclick() {
+                        e.learnings = e.learnings || [];
+                        e.learnings.push({
+                          level: 1,
+                          skillId: proj.skills[0] ? proj.skills[0].id : 1,
+                        });
+                        touch();
+                        redrawL();
+                      },
+                    },
+                    "+ add skill",
+                  ),
+                );
+              }
+              redrawL();
+              box.appendChild(h("div", { class: "subhead" }, "Skills learned"));
+              box.appendChild(lbox);
+            },
+          }),
+      },
+      {
+        label: "Skills",
+        build: () =>
+          listFormTab({
+            list: () => proj.skills,
+            blank: () => ({
+              id: 0,
+              name: "Skill",
+              icon: 8,
+              type: "magic",
+              power: 20,
+              mp: 5,
+              scope: "enemy",
+              color: "#f07030",
+              stateId: 0,
+              stateOp: "add",
+              stateChance: 100,
+            }),
+            form(e, box, redrawList) {
+              if (!e.element) e.element = RA.elementOfSkill(e);
+              box.appendChild(
+                row(
+                  field("Name", nameRefresher(e, redrawList)),
+                  iconPickerField(e, redrawList),
+                  field("Type", sel(e, "type", skillTypeSelOpts())),
+                  field("Element", sel(e, "element", elementSelOpts())),
+                  field("Power", nIn(e, "power", 0, 9999)),
+                  field("MP cost", nIn(e, "mp", 0, 999)),
+                ),
+              );
+              box.appendChild(
+                field(
+                  "Scope",
+                  sel(e, "scope", [
+                    { v: "enemy", l: "One enemy" },
+                    { v: "enemies", l: "All enemies" },
+                    { v: "ally", l: "One ally" },
+                    { v: "allies", l: "All allies" },
+                  ]),
+                ),
+              );
+              if (e.stateId == null) e.stateId = 0;
+              if (!e.stateOp) e.stateOp = "add";
+              if (e.stateChance == null) e.stateChance = 100;
+              box.appendChild(
+                h("div", { class: "subhead" }, "State effect (optional)"),
+              );
+              box.appendChild(
+                row(
+                  field(
+                    "Effect",
+                    sel(e, "stateOp", [
+                      { v: "add", l: "Add state" },
+                      { v: "remove", l: "Remove state" },
+                    ]),
+                  ),
+                  field(
+                    "State",
+                    sel(e, "stateId", dbOpts(proj.states, "(none)")),
+                  ),
+                  field("Chance %", nIn(e, "stateChance", 0, 100)),
+                ),
+              );
+              box.appendChild(
+                h(
+                  "div",
+                  { class: "dim" },
+                  "Damage: physical = power + 2·ATK − 1.2·DEF · magical = power + 2·MAT − 1.5·MDF · heal = power + 1.2·MAT. The state effect rolls per target hit (see the States tab).",
+                ),
+              );
+            },
+          }),
+      },
+      {
+        label: "Items",
+        build: () =>
+          listFormTab({
+            list: () => proj.items,
+            blank: () => ({
+              id: 0,
+              name: "Item",
+              icon: 24,
+              price: 50,
+              hp: 50,
+              mp: 0,
+              desc: "",
+            }),
+            form(e, box, redrawList) {
+              box.appendChild(
+                row(
+                  field("Name", nameRefresher(e, redrawList)),
+                  iconPickerField(e, redrawList),
+                  field("Price", nIn(e, "price", 0)),
+                ),
+              );
+              box.appendChild(
+                row(
+                  field("Restores HP", nIn(e, "hp", 0, 9999)),
+                  field("Restores MP", nIn(e, "mp", 0, 9999)),
+                ),
+              );
+              box.appendChild(field("Description", tIn(e, "desc")));
+            },
+          }),
+      },
+      {
+        label: "Weapons",
+        build: () =>
+          listFormTab({
+            list: () => proj.weapons,
+            blank: () => ({
+              id: 0,
+              name: "Weapon",
+              icon: 48,
+              price: 100,
+              wtypeId: 1,
+              params: { atk: 5 },
+            }),
+            form(e, box, redrawList) {
+              e.params = e.params || {};
+              box.appendChild(
+                row(
+                  field("Name", nameRefresher(e, redrawList)),
+                  iconPickerField(e, redrawList),
+                  field("Type", sel(e, "wtypeId", typeSelOpts("weaponTypes"))),
+                  field("Price", nIn(e, "price", 0)),
+                ),
+              );
+              const pr = h("div", { class: "frow" });
+              for (const k of PARAM_KEYS) {
+                if (e.params[k] == null) e.params[k] = 0;
+                pr.appendChild(
+                  field(k.toUpperCase() + " +", nIn(e.params, k, -999, 999)),
+                );
+              }
+              box.appendChild(pr);
+            },
+          }),
+      },
+      {
+        label: "Armors",
+        build: () =>
+          listFormTab({
+            list: () => proj.armors,
+            blank: () => ({
+              id: 0,
+              name: "Armor",
+              icon: 56,
+              price: 80,
+              atypeId: 1,
+              etypeId: 4,
+              params: { def: 4 },
+            }),
+            form(e, box, redrawList) {
+              e.params = e.params || {};
+              box.appendChild(
+                row(
+                  field("Name", nameRefresher(e, redrawList)),
+                  iconPickerField(e, redrawList),
+                  field("Price", nIn(e, "price", 0)),
+                ),
+              );
+              box.appendChild(
+                row(
+                  field("Type", sel(e, "atypeId", typeSelOpts("armorTypes"))),
+                  field(
+                    "Equip slot",
+                    sel(e, "etypeId", typeSelOpts("equipTypes")),
+                  ),
+                ),
+              );
+              const pr = h("div", { class: "frow" });
+              for (const k of PARAM_KEYS) {
+                if (e.params[k] == null) e.params[k] = 0;
+                pr.appendChild(
+                  field(k.toUpperCase() + " +", nIn(e.params, k, -999, 999)),
+                );
+              }
+              box.appendChild(pr);
+            },
+          }),
+      },
+      {
+        label: "Enemies",
+        build: () =>
+          listFormTab({
+            list: () => proj.enemies,
+            blank: () => ({
+              id: 0,
+              name: "Enemy",
+              sprite: "slime",
+              color: "#5aa84f",
+              stats: { mhp: 30, atk: 10, def: 6, mat: 5, mdf: 5, agi: 6 },
+              exp: 10,
+              gold: 10,
+              actions: [{ skillId: 0, weight: 5 }],
+            }),
+            form(e, box, redrawList) {
+              const preview = h("span", { class: "enemy-preview" });
+              function rp() {
+                preview.innerHTML = "";
+                preview.appendChild(Assets.enemyCanvas(e.sprite, e.color, 96));
+              }
+              const colorIn = h("input", {
+                type: "color",
+                value: e.color || "#5aa84f",
+                oninput(ev2) {
+                  e.color = ev2.target.value;
+                  touch();
+                  rp();
+                },
+              });
+              box.appendChild(
+                row(
+                  field("Name", nameRefresher(e, redrawList)),
+                  field(
+                    "Sprite",
+                    sel(
+                      e,
+                      "sprite",
+                      Assets.ENEMY_TYPES.map((t) => ({
+                        v: t,
+                        l: Assets.assetLabel(t),
+                      })),
+                      rp,
+                    ),
+                  ),
+                  field("Color", colorIn),
+                  preview,
+                ),
+              );
+              const st = h("div", { class: "frow" });
+              for (const k of ["mhp", "atk", "def", "mat", "mdf", "agi"])
+                st.appendChild(
+                  field(k.toUpperCase(), nIn(e.stats, k, 0, 99999)),
+                );
+              box.appendChild(st);
+              box.appendChild(
+                row(
+                  field("EXP reward", nIn(e, "exp", 0)),
+                  field("Gold reward", nIn(e, "gold", 0)),
+                ),
+              );
+              const abox = h("div", { class: "minilist" });
+              function redrawA() {
+                abox.innerHTML = "";
+                (e.actions || []).forEach((a, i) => {
+                  abox.appendChild(
+                    h(
+                      "div",
+                      { class: "minirow" },
+                      sel(
+                        a,
+                        "skillId",
+                        [{ v: 0, l: "(basic attack)" }].concat(
+                          dbOpts(proj.skills),
+                        ),
+                      ),
+                      h("span", null, "weight"),
+                      nIn(a, "weight", 1, 99),
+                      h(
+                        "button",
+                        {
+                          class: "mini",
+                          onclick() {
+                            e.actions.splice(i, 1);
+                            touch();
+                            redrawA();
+                          },
+                        },
+                        "✕",
+                      ),
+                    ),
+                  );
+                });
+                abox.appendChild(
+                  h(
+                    "button",
+                    {
+                      class: "mini",
+                      onclick() {
+                        e.actions = e.actions || [];
+                        e.actions.push({ skillId: 0, weight: 1 });
+                        touch();
+                        redrawA();
+                      },
+                    },
+                    "+ add action",
+                  ),
+                );
+              }
+              redrawA();
+              box.appendChild(
+                h("div", { class: "subhead" }, "Actions (picked by weight)"),
+              );
+              box.appendChild(abox);
+              rp();
+            },
+          }),
+      },
+      {
+        label: "Troops",
+        build: () =>
+          listFormTab({
+            list: () => proj.troops,
+            blank: () => ({ id: 0, name: "Troop", enemies: [] }),
+            form(e, box, redrawList) {
+              box.appendChild(field("Name", nameRefresher(e, redrawList)));
+              const mbox = h("div", { class: "frow" });
+              function redrawM() {
+                mbox.innerHTML = "";
+                for (let i = 0; i < 4; i++) {
+                  const slot = { v: e.enemies[i] || 0 };
+                  mbox.appendChild(
+                    field(
+                      "Slot " + (i + 1),
+                      sel(slot, "v", dbOpts(proj.enemies, "(empty)"), () => {
+                        const arr = [];
+                        const slots = mbox.querySelectorAll("select");
+                        slots.forEach((s2) => {
+                          const v = Number(s2.value);
+                          if (v) arr.push(v);
+                        });
+                        e.enemies = arr;
+                        touch();
+                      }),
+                    ),
+                  );
+                }
+              }
+              redrawM();
+              box.appendChild(
+                h("div", { class: "subhead" }, "Members (up to 4)"),
+              );
+              box.appendChild(mbox);
+            },
+          }),
+      },
+      {
+        label: "Quests",
+        build: () =>
+          listFormTab({
+            list: () => proj.quests,
+            allowEmpty: true,
+            reorderable: true,
+            blank: () => ({
+              id: 0,
+              name: "Quest",
+              shortDesc: "",
+              desc: "",
+              category: "side",
+              visible: true,
+              objectives: [],
+              startReqs: [],
+              failConditions: [],
+              rewards: [],
+              failEffects: [],
+              failText: "",
+              nextQuestIds: [],
+              autoStartNext: false,
+              allowRestartOnFail: false,
+              canAbandon: false,
+            }),
+            form(e, box, redrawList) {
+              if (!e.name) e.name = "Quest";
+              if (e.shortDesc == null) e.shortDesc = "";
+              if (e.desc == null) e.desc = "";
+              if (!Array.isArray(e.objectives)) e.objectives = [];
+              if (!Array.isArray(e.rewards)) e.rewards = [];
+              if (!Array.isArray(e.startReqs)) e.startReqs = [];
+              if (!Array.isArray(e.failConditions)) e.failConditions = [];
+              if (!Array.isArray(e.failEffects)) e.failEffects = [];
+              if (!Array.isArray(e.nextQuestIds)) e.nextQuestIds = [];
+              if (!e.category) e.category = "side";
+              if (e.visible == null) e.visible = true;
+              if (e.autoStartNext == null) e.autoStartNext = false;
+              if (e.failText == null) e.failText = "";
+              if (e.allowRestartOnFail == null) e.allowRestartOnFail = false;
+              if (e.canAbandon == null) e.canAbandon = false;
+
+              function effectEditor(list, title, addLabel, blank, kinds) {
+                const panel = h("div", { class: "minilist" });
+                function redraw() {
+                  panel.innerHTML = "";
+                  list.forEach((rw, i) => {
+                    if (!rw.kind) rw.kind = kinds[0].v;
+                    const rowEl = h("div", { class: "minirow" });
+                    rowEl.appendChild(sel(rw, "kind", kinds, redraw));
+                    if (rw.kind === "item") {
+                      if (!rw.itemKind) rw.itemKind = "item";
+                      const entryWrap = h("span");
+                      const redrawEntry = () => {
+                        const arr =
+                          rw.itemKind === "weapon"
+                            ? proj.weapons
+                            : rw.itemKind === "armor"
+                              ? proj.armors
+                              : proj.items;
+                        if (!arr.some((it) => it.id === Number(rw.id)))
+                          rw.id = arr[0] ? arr[0].id : 0;
+                        entryWrap.innerHTML = "";
+                        entryWrap.appendChild(
+                          sel(rw, "id", dbOpts(arr, "(none)")),
+                        );
+                      };
+                      rowEl.appendChild(
+                        sel(
+                          rw,
+                          "itemKind",
+                          [
+                            { v: "item", l: "Item" },
+                            { v: "weapon", l: "Weapon" },
+                            { v: "armor", l: "Armor" },
+                          ],
+                          redrawEntry,
+                        ),
+                      );
+                      redrawEntry();
+                      rowEl.appendChild(entryWrap);
+                      rowEl.appendChild(nIn(rw, "count", 1, 99));
+                    } else if (rw.kind === "switch") {
+                      rowEl.appendChild(sel(rw, "id", switchOpts()));
+                      rowEl.appendChild(
+                        sel(rw, "val", [
+                          { v: "true", l: "ON" },
+                          { v: "false", l: "OFF" },
+                        ]),
+                      );
+                    } else if (rw.kind === "var") {
+                      rowEl.appendChild(sel(rw, "id", varOpts()));
+                      rowEl.appendChild(
+                        sel(rw, "op", [
+                          { v: "set", l: "Set" },
+                          { v: "add", l: "Add" },
+                          { v: "sub", l: "Sub" },
+                        ]),
+                      );
+                      rowEl.appendChild(nIn(rw, "amount", -9999999, 9999999));
+                    } else if (
+                      rw.kind === "questUnlock" ||
+                      rw.kind === "questLock"
+                    ) {
+                      rowEl.appendChild(
+                        sel(rw, "questId", dbOpts(proj.quests, "(none)")),
+                      );
+                    } else {
+                      rowEl.appendChild(nIn(rw, "amount", 0, 9999999));
+                    }
+                    rowEl.appendChild(
+                      h(
+                        "button",
+                        {
+                          class: "mini",
+                          onclick() {
+                            list.splice(i, 1);
+                            touch();
+                            redraw();
+                          },
+                        },
+                        "✕",
+                      ),
+                    );
+                    panel.appendChild(rowEl);
+                  });
+                  panel.appendChild(
+                    h(
+                      "button",
+                      {
+                        class: "mini",
+                        onclick() {
+                          list.push(blank());
+                          touch();
+                          redraw();
+                        },
+                      },
+                      addLabel,
+                    ),
+                  );
+                }
+                redraw();
+                box.appendChild(h("div", { class: "subhead" }, title));
+                box.appendChild(panel);
+              }
+              function failConditionEditor() {
+                const panel = h("div", { class: "minilist" });
+                function redraw() {
+                  panel.innerHTML = "";
+                  e.failConditions.forEach((fc, i) => {
+                    if (!fc.kind) fc.kind = "manual";
+                    const rowEl = h("div", {
+                      class: "minirow",
+                      style: "align-items:flex-start; flex-wrap:wrap",
+                    });
+                    rowEl.appendChild(
+                      field(
+                        "Type",
+                        sel(
+                          fc,
+                          "kind",
+                          stringSelOpts([
+                            "manual",
+                            "switch",
+                            "var",
+                            "battleLose",
+                            "enemyDefeatCount",
+                          ]),
+                          redraw,
+                        ),
+                      ),
+                    );
+                    if (fc.kind === "switch") {
+                      rowEl.appendChild(
+                        field("Switch", sel(fc, "id", switchOpts())),
+                      );
+                      rowEl.appendChild(
+                        field(
+                          "State",
+                          sel(fc, "val", [
+                            { v: "true", l: "ON" },
+                            { v: "false", l: "OFF" },
+                          ]),
+                        ),
+                      );
+                    } else if (fc.kind === "var") {
+                      rowEl.appendChild(
+                        field("Variable", sel(fc, "id", varOpts())),
+                      );
+                      rowEl.appendChild(
+                        field(
+                          "Cmp",
+                          sel(fc, "cmp", [
+                            { v: ">=", l: "≥" },
+                            { v: "==", l: "=" },
+                            { v: "<=", l: "≤" },
+                          ]),
+                        ),
+                      );
+                      rowEl.appendChild(
+                        field("Value", nIn(fc, "val", -9999999, 9999999)),
+                      );
+                    } else if (fc.kind === "battleLose") {
+                      rowEl.appendChild(
+                        field(
+                          "Troop",
+                          sel(fc, "troopId", dbOpts(proj.troops, "(none)")),
+                        ),
+                      );
+                    } else if (fc.kind === "enemyDefeatCount") {
+                      rowEl.appendChild(
+                        field(
+                          "Enemy",
+                          sel(fc, "enemyId", dbOpts(proj.enemies, "(none)")),
+                        ),
+                      );
+                      rowEl.appendChild(
+                        field("Losses", nIn(fc, "count", 1, 99)),
+                      );
+                    } else {
+                      rowEl.appendChild(
+                        h(
+                          "div",
+                          { class: "dim" },
+                          "Manual fail only — use the Fail Quest command.",
+                        ),
+                      );
+                    }
+                    rowEl.appendChild(
+                      h(
+                        "button",
+                        {
+                          class: "mini",
+                          onclick() {
+                            e.failConditions.splice(i, 1);
+                            touch();
+                            redraw();
+                          },
+                        },
+                        "✕",
+                      ),
+                    );
+                    panel.appendChild(rowEl);
+                  });
+                  panel.appendChild(
+                    h(
+                      "button",
+                      {
+                        class: "mini",
+                        onclick() {
+                          e.failConditions.push({ kind: "manual" });
+                          touch();
+                          redraw();
+                        },
+                      },
+                      "+ add fail condition",
+                    ),
+                  );
+                }
+                redraw();
+                box.appendChild(
+                  h("div", { class: "subhead" }, "Fail conditions"),
+                );
+                box.appendChild(panel);
+              }
+
+              function requirementEditor() {
+                const panel = h("div", { class: "minilist" });
+                function redraw() {
+                  panel.innerHTML = "";
+                  e.startReqs.forEach((rq, i) => {
+                    if (!rq.kind) rq.kind = "quest";
+                    const rowEl = h("div", { class: "minirow" });
+                    rowEl.appendChild(
+                      sel(
+                        rq,
+                        "kind",
+                        [
+                          { v: "quest", l: "Quest state" },
+                          { v: "switch", l: "Switch" },
+                          { v: "var", l: "Variable" },
+                        ],
+                        redraw,
+                      ),
+                    );
+                    if (rq.kind === "quest") {
+                      const questOpts = [{ v: 0, l: "(none)" }].concat(
+                        proj.quests
+                          .filter((q) => q !== e)
+                          .map((q) => ({
+                            v: q.id,
+                            l: q.id + ": " + (q.name || "Quest"),
+                          })),
+                      );
+                      rowEl.appendChild(sel(rq, "questId", questOpts));
+                      rowEl.appendChild(
+                        sel(
+                          rq,
+                          "status",
+                          stringSelOpts([
+                            "active",
+                            "completed",
+                            "failed",
+                            "abandoned",
+                          ]),
+                        ),
+                      );
+                    } else if (rq.kind === "switch") {
+                      rowEl.appendChild(sel(rq, "id", switchOpts()));
+                      rowEl.appendChild(
+                        sel(rq, "val", [
+                          { v: "true", l: "ON" },
+                          { v: "false", l: "OFF" },
+                        ]),
+                      );
+                    } else {
+                      rowEl.appendChild(sel(rq, "id", varOpts()));
+                      rowEl.appendChild(
+                        sel(rq, "cmp", [
+                          { v: ">=", l: "≥" },
+                          { v: "==", l: "=" },
+                          { v: "<=", l: "≤" },
+                        ]),
+                      );
+                      rowEl.appendChild(nIn(rq, "val", -9999999, 9999999));
+                    }
+                    rowEl.appendChild(
+                      h(
+                        "button",
+                        {
+                          class: "mini",
+                          onclick() {
+                            e.startReqs.splice(i, 1);
+                            touch();
+                            redraw();
+                          },
+                        },
+                        "✕",
+                      ),
+                    );
+                    panel.appendChild(rowEl);
+                  });
+                  panel.appendChild(
+                    h(
+                      "button",
+                      {
+                        class: "mini",
+                        onclick() {
+                          e.startReqs.push({
+                            kind: "quest",
+                            questId: 0,
+                            status: "completed",
+                          });
+                          touch();
+                          redraw();
+                        },
+                      },
+                      "+ add requirement",
+                    ),
+                  );
+                }
+                redraw();
+                box.appendChild(
+                  h(
+                    "div",
+                    { class: "subhead" },
+                    "Availability / start requirements",
+                  ),
+                );
+                box.appendChild(panel);
+              }
+              function objectiveEditor() {
+                const panel = h("div", { class: "minilist" });
+                function redraw() {
+                  panel.innerHTML = "";
+                  e.objectives.forEach((obj, i) => {
+                    if (!obj.kind) obj.kind = "event";
+                    if (!obj.label) obj.label = "";
+                    if (obj.count == null) obj.count = 1;
+                    const rowEl = h("div", {
+                      class: "minirow",
+                      style: "align-items:flex-start; flex-wrap:wrap",
+                    });
+                    rowEl.appendChild(
+                      field(
+                        "Type",
+                        sel(
+                          obj,
+                          "kind",
+                          stringSelOpts(["event", "kill", "fetch"]),
+                          redraw,
+                        ),
+                      ),
+                    );
+                    rowEl.appendChild(field("Label", tIn(obj, "label")));
+                    rowEl.appendChild(
+                      field("Count", nIn(obj, "count", 1, 999)),
+                    );
+                    if (obj.kind === "kill") {
+                      rowEl.appendChild(
+                        field(
+                          "Enemy",
+                          sel(obj, "enemyId", dbOpts(proj.enemies, "(none)")),
+                        ),
+                      );
+                    } else if (obj.kind === "fetch") {
+                      const itemWrap = h("span");
+                      const eventWrap = h("span");
+                      const redrawItem = () => {
+                        const arr =
+                          obj.itemKind === "weapon"
+                            ? proj.weapons
+                            : obj.itemKind === "armor"
+                              ? proj.armors
+                              : proj.items;
+                        if (!arr.some((it) => it.id === Number(obj.id)))
+                          obj.id = arr[0] ? arr[0].id : 0;
+                        itemWrap.innerHTML = "";
+                        itemWrap.appendChild(
+                          sel(obj, "id", dbOpts(arr, "(none)")),
+                        );
+                      };
+                      const redrawEvent = () => {
+                        const map = RA.byId(proj.maps, obj.targetMapId);
+                        const eventOpts = [{ v: 0, l: "(any)" }].concat(
+                          (map || { events: [] }).events.map((ev2) => ({
+                            v: ev2.id,
+                            l: ev2.id + ": " + ev2.name,
+                          })),
+                        );
+                        eventWrap.innerHTML = "";
+                        eventWrap.appendChild(
+                          sel(obj, "targetEventId", eventOpts),
+                        );
+                      };
+                      if (!obj.itemKind) obj.itemKind = "item";
+                      rowEl.appendChild(
+                        field(
+                          "Kind",
+                          sel(
+                            obj,
+                            "itemKind",
+                            [
+                              { v: "item", l: "Item" },
+                              { v: "weapon", l: "Weapon" },
+                              { v: "armor", l: "Armor" },
+                            ],
+                            redrawItem,
+                          ),
+                        ),
+                      );
+                      redrawItem();
+                      rowEl.appendChild(field("Entry", itemWrap));
+                      rowEl.appendChild(
+                        field(
+                          "Turn-in map",
+                          sel(
+                            obj,
+                            "targetMapId",
+                            dbOpts(proj.maps, "(any)"),
+                            redrawEvent,
+                          ),
+                        ),
+                      );
+                      redrawEvent();
+                      rowEl.appendChild(field("Turn-in event", eventWrap));
+                      rowEl.appendChild(
+                        field(
+                          "Consume on complete",
+                          chk(obj, "consumeOnComplete"),
+                        ),
+                      );
+                    }
+                    rowEl.appendChild(
+                      h(
+                        "button",
+                        {
+                          class: "mini",
+                          onclick() {
+                            e.objectives.splice(i, 1);
+                            touch();
+                            redraw();
+                          },
+                        },
+                        "✕",
+                      ),
+                    );
+                    panel.appendChild(rowEl);
+                  });
+                  panel.appendChild(
+                    h(
+                      "div",
+                      { class: "minirow" },
+                      h(
+                        "button",
+                        {
+                          class: "mini",
+                          onclick() {
+                            e.objectives.push({
+                              kind: "event",
+                              label: "Talk to target",
+                              count: 1,
+                            });
+                            touch();
+                            redraw();
+                          },
+                        },
+                        "+ Event objective",
+                      ),
+                      h(
+                        "button",
+                        {
+                          class: "mini",
+                          onclick() {
+                            e.objectives.push({
+                              kind: "kill",
+                              label: "Defeat target enemies",
+                              enemyId: proj.enemies[0] ? proj.enemies[0].id : 0,
+                              count: 3,
+                            });
+                            touch();
+                            redraw();
+                          },
+                        },
+                        "+ Kill objective",
+                      ),
+                      h(
+                        "button",
+                        {
+                          class: "mini",
+                          onclick() {
+                            e.objectives.push({
+                              kind: "fetch",
+                              label: "Bring requested item",
+                              itemKind: "item",
+                              id: proj.items[0] ? proj.items[0].id : 0,
+                              count: 1,
+                              targetMapId: 0,
+                              targetEventId: 0,
+                              consumeOnComplete: false,
+                            });
+                            touch();
+                            redraw();
+                          },
+                        },
+                        "+ Fetch objective",
+                      ),
+                    ),
+                  );
+                }
+                redraw();
+                box.appendChild(h("div", { class: "subhead" }, "Objectives"));
+                box.appendChild(panel);
+              }
+
+              box.appendChild(
+                row(
+                  field("Title", nameRefresher(e, redrawList)),
+                  field(
+                    "Category",
+                    sel(
+                      e,
+                      "category",
+                      stringSelOpts(["main", "side", "guild", "hidden"]),
+                    ),
+                  ),
+                  field("Visible in journal", chk(e, "visible")),
+                ),
+              );
+              const shortDesc = h("input", {
+                type: "text",
+                value: e.shortDesc || "",
+                oninput(ev) {
+                  e.shortDesc = ev.target.value;
+                  touch();
+                },
+              });
+              const desc = h(
+                "textarea",
+                {
+                  rows: 5,
+                  oninput(ev) {
+                    e.desc = ev.target.value;
+                    touch();
+                  },
+                },
+                e.desc || "",
+              );
+              box.appendChild(field("Short description", shortDesc));
+              box.appendChild(field("Long description", desc));
+
+              objectiveEditor();
+              requirementEditor();
+              failConditionEditor();
+
+              effectEditor(
+                e.rewards,
+                "Rewards",
+                "+ add reward",
+                () => ({ kind: "gold", amount: 100 }),
+                [
+                  { v: "exp", l: "XP" },
+                  { v: "gold", l: "Money" },
+                  { v: "item", l: "Item" },
+                ],
+              );
+
+              effectEditor(
+                e.failEffects,
+                "Fail effects",
+                "+ add fail effect",
+                () => ({ kind: "switch", id: 1, val: "true" }),
+                [
+                  { v: "gold", l: "Money" },
+                  { v: "item", l: "Item" },
+                  { v: "switch", l: "Switch" },
+                  { v: "var", l: "Variable" },
+                  { v: "questUnlock", l: "Unlock quest" },
+                  { v: "questLock", l: "Lock quest" },
+                ],
+              );
+              box.appendChild(
+                field(
+                  "Failure / consequence text",
+                  h(
+                    "textarea",
+                    {
+                      rows: 3,
+                      oninput(ev) {
+                        e.failText = ev.target.value;
+                        touch();
+                      },
+                    },
+                    e.failText || "",
+                  ),
+                ),
+              );
+
+              const nextBox = h("div", { class: "minilist" });
+              function redrawNext() {
+                nextBox.innerHTML = "";
+                e.nextQuestIds.forEach((id, i) => {
+                  const slot = { id };
+                  const options = [{ v: 0, l: "(none)" }].concat(
+                    proj.quests
+                      .filter((q) => q !== e)
+                      .map((q) => ({
+                        v: q.id,
+                        l: q.id + ": " + (q.name || "Quest"),
+                      })),
+                  );
+                  nextBox.appendChild(
+                    h(
+                      "div",
+                      { class: "minirow" },
+                      sel(slot, "id", options, () => {
+                        e.nextQuestIds[i] = slot.id;
+                        e.nextQuestIds = e.nextQuestIds.filter(
+                          (qid) => qid && qid !== e.id,
+                        );
+                        touch();
+                      }),
+                      h(
+                        "button",
+                        {
+                          class: "mini",
+                          onclick() {
+                            e.nextQuestIds.splice(i, 1);
+                            touch();
+                            redrawNext();
+                          },
+                        },
+                        "✕",
+                      ),
+                    ),
+                  );
+                });
+                nextBox.appendChild(
+                  h(
+                    "button",
+                    {
+                      class: "mini",
+                      onclick() {
+                        const candidate = proj.quests.find(
+                          (q) => q !== e && !e.nextQuestIds.includes(q.id),
+                        );
+                        if (!candidate) return;
+                        e.nextQuestIds.push(candidate.id);
+                        touch();
+                        redrawNext();
+                      },
+                    },
+                    "+ add next quest",
+                  ),
+                );
+              }
+              redrawNext();
+              box.appendChild(h("div", { class: "subhead" }, "Next quests"));
+              box.appendChild(nextBox);
+              box.appendChild(
+                field("Auto-start next quests", chk(e, "autoStartNext")),
+              );
+              box.appendChild(
+                row(
+                  field(
+                    "Allow restart after fail",
+                    chk(e, "allowRestartOnFail"),
+                  ),
+                  field("Player can abandon", chk(e, "canAbandon")),
+                ),
+              );
+            },
+          }),
+      },
+      {
+        label: "States",
+        build: () =>
+          listFormTab({
+            list: () => proj.states,
+            blank: () => ({
+              id: 0,
+              name: "State",
+              icon: 12,
+              color: "#a050d8",
+              restrict: "none",
+              hpTurn: 0,
+              minTurns: 2,
+              maxTurns: 4,
+              removeAtEnd: true,
+            }),
+            form(e, box, redrawList) {
+              const colorIn = h("input", {
+                type: "color",
+                value: e.color || "#a050d8",
+                oninput(ev2) {
+                  e.color = ev2.target.value;
+                  touch();
+                },
+              });
+              box.appendChild(
+                row(
+                  field("Name", nameRefresher(e, redrawList)),
+                  iconPickerField(e, redrawList),
+                  field("Color", colorIn),
+                ),
+              );
+              box.appendChild(
+                row(
+                  field(
+                    "Restriction",
+                    sel(e, "restrict", [
+                      { v: "none", l: "None" },
+                      { v: "act", l: "Cannot act" },
+                    ]),
+                  ),
+                  field("HP per turn %", nIn(e, "hpTurn", -100, 100)),
+                  field("Min turns", nIn(e, "minTurns", 1, 99)),
+                  field("Max turns", nIn(e, "maxTurns", 1, 99)),
+                  field("Removed after battle", chk(e, "removeAtEnd")),
+                ),
+              );
+              box.appendChild(
+                h(
+                  "div",
+                  { class: "dim" },
+                  "Negative HP per turn deals damage each round (poison); positive restores (regen). “Cannot act” makes the battler skip its turns (stun). States are inflicted or cured by skills — set that on the Skills tab. Full recovery cures all states.",
+                ),
+              );
+            },
+          }),
+      },
       { label: "Types", build: () => typesTab() },
-      { label: "Switches", build: () => nameListTab("switches", "S", RA.MAX_SWITCHES) },
-      { label: "Variables", build: () => nameListTab("variables", "V", RA.MAX_VARIABLES) },
+      {
+        label: "Switches",
+        build: () => nameListTab("switches", "S", RA.MAX_SWITCHES),
+      },
+      {
+        label: "Variables",
+        build: () => nameListTab("variables", "V", RA.MAX_VARIABLES),
+      },
     ];
   }
 
   // A unique string key for a new element / skill type, kept stable so that
   // renaming or reordering never breaks references stored on skills & traits.
   function uniqueTypeKey(prefix, list) {
-    let n = list.length + 1, key;
-    do { key = prefix + n; n++; } while (list.some((e) => e.key === key));
+    let n = list.length + 1,
+      key;
+    do {
+      key = prefix + n;
+      n++;
+    } while (list.some((e) => e.key === key));
     return key;
   }
 
@@ -4506,23 +8196,56 @@ const editorI18n = await createEditorI18n({
     function redraw() {
       rows.innerHTML = "";
       list.forEach((entry, i) => {
-        const num = h("span", { class: "types-num" }, String(i + 1).padStart(2, "0"));
-        const input = h("input", { type: "text", value: entry.name || "",
-          oninput(ev) { entry.name = ev.target.value; touch(); } });
-        const del = h("button", {
-          class: "mini danger", title: "Delete", "aria-label": "Delete " + (entry.name || "entry"),
-          onclick() {
-            if (list.length <= 1) { alert("Keep at least one entry."); return; }
-            list.splice(i, 1); touch(); redraw();
+        const num = h(
+          "span",
+          { class: "types-num" },
+          String(i + 1).padStart(2, "0"),
+        );
+        const input = h("input", {
+          type: "text",
+          value: entry.name || "",
+          oninput(ev) {
+            entry.name = ev.target.value;
+            touch();
           },
-        }, "✕");
+        });
+        const del = h(
+          "button",
+          {
+            class: "mini danger",
+            title: "Delete",
+            "aria-label": "Delete " + (entry.name || "entry"),
+            onclick() {
+              if (list.length <= 1) {
+                alert("Keep at least one entry.");
+                return;
+              }
+              list.splice(i, 1);
+              touch();
+              redraw();
+            },
+          },
+          "✕",
+        );
         rows.appendChild(h("div", { class: "types-row" }, num, input, del));
       });
     }
     redraw();
     col.appendChild(rows);
-    col.appendChild(h("button", { class: "mini types-add",
-      onclick() { list.push(blank()); touch(); redraw(); } }, "+ Add"));
+    col.appendChild(
+      h(
+        "button",
+        {
+          class: "mini types-add",
+          onclick() {
+            list.push(blank());
+            touch();
+            redraw();
+          },
+        },
+        "+ Add",
+      ),
+    );
     if (lockedNote) col.appendChild(h("div", { class: "dim" }, lockedNote));
     return col;
   }
@@ -4530,22 +8253,48 @@ const editorI18n = await createEditorI18n({
   function typesTab() {
     const t = proj.system.types;
     const box = h("div", { class: "dbform single" });
-    box.appendChild(h("div", { class: "dim", style: "margin-bottom:10px" },
-      "Define the categories your game uses. Elements drive resistances (set them on Classes ▸ Traits and pick one per skill). " +
-      "Skill types label the three combat classes — only Physical, Magical and Heal affect the damage formula. " +
-      "Weapon, armor and equipment types tag equipment for organisation. Renaming or reordering is always safe."));
+    box.appendChild(
+      h(
+        "div",
+        { class: "dim", style: "margin-bottom:10px" },
+        "Define the categories your game uses. Elements drive resistances (set them on Classes ▸ Traits and pick one per skill). " +
+          "Skill types label the three combat classes — only Physical, Magical and Heal affect the damage formula. " +
+          "Weapon, armor and equipment types tag equipment for organisation. Renaming or reordering is always safe.",
+      ),
+    );
     const cols = h("div", { class: "types-cols" });
-    cols.appendChild(typeColumn(t.elements, "Elements",
-      () => ({ key: uniqueTypeKey("elem", t.elements), name: "New Element" })));
-    cols.appendChild(typeColumn(t.skillTypes, "Skill Types",
-      () => ({ key: uniqueTypeKey("stype", t.skillTypes), name: "New Type" }),
-      "Extra skill types beyond the first three are labels only."));
-    cols.appendChild(typeColumn(t.weaponTypes, "Weapon Types",
-      () => ({ id: RA.nextId(t.weaponTypes), name: "New Weapon Type" })));
-    cols.appendChild(typeColumn(t.armorTypes, "Armor Types",
-      () => ({ id: RA.nextId(t.armorTypes), name: "New Armor Type" })));
-    cols.appendChild(typeColumn(t.equipTypes, "Equipment Types",
-      () => ({ id: RA.nextId(t.equipTypes), name: "New Slot" })));
+    cols.appendChild(
+      typeColumn(t.elements, "Elements", () => ({
+        key: uniqueTypeKey("elem", t.elements),
+        name: "New Element",
+      })),
+    );
+    cols.appendChild(
+      typeColumn(
+        t.skillTypes,
+        "Skill Types",
+        () => ({ key: uniqueTypeKey("stype", t.skillTypes), name: "New Type" }),
+        "Extra skill types beyond the first three are labels only.",
+      ),
+    );
+    cols.appendChild(
+      typeColumn(t.weaponTypes, "Weapon Types", () => ({
+        id: RA.nextId(t.weaponTypes),
+        name: "New Weapon Type",
+      })),
+    );
+    cols.appendChild(
+      typeColumn(t.armorTypes, "Armor Types", () => ({
+        id: RA.nextId(t.armorTypes),
+        name: "New Armor Type",
+      })),
+    );
+    cols.appendChild(
+      typeColumn(t.equipTypes, "Equipment Types", () => ({
+        id: RA.nextId(t.equipTypes),
+        name: "New Slot",
+      })),
+    );
     box.appendChild(cols);
     return box;
   }
@@ -4559,16 +8308,24 @@ const editorI18n = await createEditorI18n({
       const input = h("input", {
         type: "text",
         value: names[i],
-        oninput(e) { names[i] = e.target.value; touch(); },
+        oninput(e) {
+          names[i] = e.target.value;
+          touch();
+        },
       });
-      box.insertBefore(field(prefix + String(i + 1).padStart(3, "0"), input), addBtn);
+      box.insertBefore(
+        field(prefix + String(i + 1).padStart(3, "0"), input),
+        addBtn,
+      );
       return input;
     }
 
     function updateAddButton() {
       const atLimit = names.length >= maxEntries;
       addBtn.disabled = atLimit;
-      addBtn.textContent = atLimit ? "Maximum " + maxEntries + " reached" : "Add New";
+      addBtn.textContent = atLimit
+        ? "Maximum " + maxEntries + " reached"
+        : "Add New";
     }
 
     box.appendChild(addBtn);
@@ -4595,14 +8352,34 @@ const editorI18n = await createEditorI18n({
     let cur = 0;
     function show(i) {
       cur = i;
-      tabBar.querySelectorAll("button").forEach((b, bi) => b.classList.toggle("sel", bi === i));
+      tabBar
+        .querySelectorAll("button")
+        .forEach((b, bi) => b.classList.toggle("sel", bi === i));
       body.innerHTML = "";
       body.appendChild(tabs[i].build());
     }
-    tabs.forEach((t, i) => tabBar.appendChild(h("button", { onclick: () => show(i) }, t.label)));
+    tabs.forEach((t, i) =>
+      tabBar.appendChild(h("button", { onclick: () => show(i) }, t.label)),
+    );
     const content = h("div", { class: "dbwrap" }, tabBar, body);
-    modal({ title: "Database", content, wide: true, class: "db-modal", dismissable: false,
-      buttons: [{ label: "btn.close", primary: true, onClick(c) { c(); rebuildMapList(); renderMap(); } }] });
+    modal({
+      title: "Database",
+      content,
+      wide: true,
+      class: "db-modal",
+      dismissable: false,
+      buttons: [
+        {
+          label: "btn.close",
+          primary: true,
+          onClick(c) {
+            c();
+            rebuildMapList();
+            renderMap();
+          },
+        },
+      ],
+    });
     show(0);
   }
 
@@ -4629,37 +8406,108 @@ atlas.onMapLoad((map) => {
     const plugins = proj.plugins;
     let cur = plugins[0] || null;
     const list = h("ul", { class: "plug-list" });
-    const nameIn = h("input", { type: "text", placeholder: "Plugin name", oninput(e) { if (cur) { cur.name = e.target.value; touch(); redrawList(); } } });
-    const codeTa = h("textarea", { spellcheck: "false", oninput(e) { if (cur) { cur.code = e.target.value; touch(); } } });
+    const nameIn = h("input", {
+      type: "text",
+      placeholder: "Plugin name",
+      oninput(e) {
+        if (cur) {
+          cur.name = e.target.value;
+          touch();
+          redrawList();
+        }
+      },
+    });
+    const codeTa = h("textarea", {
+      spellcheck: "false",
+      oninput(e) {
+        if (cur) {
+          cur.code = e.target.value;
+          touch();
+        }
+      },
+    });
     function redrawList() {
       list.innerHTML = "";
       plugins.forEach((pl) => {
-        const cb = h("input", { type: "checkbox",
-          onclick(e) { e.stopPropagation(); },
-          onchange(e) { pl.on = e.target.checked; touch(); redrawList(); },
-          ...(pl.on ? { checked: "" } : {}) });
-        const kids = [cb, h("span", { class: "plug-name" }, pl.name || "(unnamed)")];
-        if (pl.builtin) kids.push(h("span", { class: "plug-badge" }, "built-in"));
-        list.appendChild(h("li", {
-          class: (pl === cur ? "sel" : "") + (pl.on ? "" : " off"),
-          onclick() { cur = pl; redrawList(); redrawForm(); },
-        }, ...kids));
+        const cb = h("input", {
+          type: "checkbox",
+          onclick(e) {
+            e.stopPropagation();
+          },
+          onchange(e) {
+            pl.on = e.target.checked;
+            touch();
+            redrawList();
+          },
+          ...(pl.on ? { checked: "" } : {}),
+        });
+        const kids = [
+          cb,
+          h("span", { class: "plug-name" }, pl.name || "(unnamed)"),
+        ];
+        if (pl.builtin)
+          kids.push(h("span", { class: "plug-badge" }, "built-in"));
+        list.appendChild(
+          h(
+            "li",
+            {
+              class: (pl === cur ? "sel" : "") + (pl.on ? "" : " off"),
+              onclick() {
+                cur = pl;
+                redrawList();
+                redrawForm();
+              },
+            },
+            ...kids,
+          ),
+        );
       });
     }
     function addBuiltinPicker() {
-      const missing = typeof AtlasBuiltins !== "undefined" ? AtlasBuiltins.missingFor(plugins) : [];
-      if (!missing.length) { flashStatus("All bundled plugins are already in this project"); return; }
+      const missing =
+        typeof AtlasBuiltins !== "undefined"
+          ? AtlasBuiltins.missingFor(plugins)
+          : [];
+      if (!missing.length) {
+        flashStatus("All bundled plugins are already in this project");
+        return;
+      }
       const box = h("div", { class: "minilist" });
-      const picker = modal({ title: "Add Bundled Plugin", content: box, buttons: [{ label: "Cancel" }] });
+      const picker = modal({
+        title: "Add Bundled Plugin",
+        content: box,
+        buttons: [{ label: "Cancel" }],
+      });
       missing.forEach((spec) => {
-        box.appendChild(h("div", { class: "minirow", style: "align-items:flex-start" },
-          h("div", { style: "flex:1" }, h("b", null, spec.key), h("div", { class: "dim" }, spec.desc)),
-          h("button", { class: "mini", onclick() {
-            const id = RA.nextId(plugins.length ? plugins : [{ id: 0 }]);
-            const pl = AtlasBuiltins.make(spec.key, id);
-            plugins.push(pl); cur = pl;
-            touch(); redrawList(); redrawForm(); picker.close();
-          } }, "Add")));
+        box.appendChild(
+          h(
+            "div",
+            { class: "minirow", style: "align-items:flex-start" },
+            h(
+              "div",
+              { style: "flex:1" },
+              h("b", null, spec.key),
+              h("div", { class: "dim" }, spec.desc),
+            ),
+            h(
+              "button",
+              {
+                class: "mini",
+                onclick() {
+                  const id = RA.nextId(plugins.length ? plugins : [{ id: 0 }]);
+                  const pl = AtlasBuiltins.make(spec.key, id);
+                  plugins.push(pl);
+                  cur = pl;
+                  touch();
+                  redrawList();
+                  redrawForm();
+                  picker.close();
+                },
+              },
+              "Add",
+            ),
+          ),
+        );
       });
     }
     function redrawForm() {
@@ -4669,68 +8517,160 @@ atlas.onMapLoad((map) => {
     }
     function move(d) {
       if (!cur) return;
-      const i = plugins.indexOf(cur), ni = i + d;
+      const i = plugins.indexOf(cur),
+        ni = i + d;
       if (ni < 0 || ni >= plugins.length) return;
-      plugins.splice(i, 1); plugins.splice(ni, 0, cur);
-      touch(); redrawList();
+      plugins.splice(i, 1);
+      plugins.splice(ni, 0, cur);
+      touch();
+      redrawList();
     }
-    const side = h("div", { class: "plug-side" },
-      h("div", { class: "dbbtns" },
-        h("button", { onclick() {
-          const pl = { id: RA.nextId(plugins.length ? plugins : [{ id: 0 }]), name: "New Plugin", on: true, code: PLUGIN_TEMPLATE };
-          plugins.push(pl); cur = pl;
-          touch(); redrawList(); redrawForm();
-        } }, "+ New"),
-        h("button", { title: "Add one of the engine's bundled plugins", onclick: addBuiltinPicker }, "+ Built-in…"),
-        h("button", { onclick() {
-          if (!cur) return;
-          confirmBox('Delete plugin "' + cur.name + '"?', () => {
-            plugins.splice(plugins.indexOf(cur), 1);
-            cur = plugins[0] || null;
-            touch(); redrawList(); redrawForm();
-          });
-        } }, "Delete"),
-        h("button", { class: "mini", title: "Run earlier", onclick: () => move(-1) }, "↑"),
-        h("button", { class: "mini", title: "Run later", onclick: () => move(1) }, "↓"),
+    const side = h(
+      "div",
+      { class: "plug-side" },
+      h(
+        "div",
+        { class: "dbbtns" },
+        h(
+          "button",
+          {
+            onclick() {
+              const pl = {
+                id: RA.nextId(plugins.length ? plugins : [{ id: 0 }]),
+                name: "New Plugin",
+                on: true,
+                code: PLUGIN_TEMPLATE,
+              };
+              plugins.push(pl);
+              cur = pl;
+              touch();
+              redrawList();
+              redrawForm();
+            },
+          },
+          "+ New",
+        ),
+        h(
+          "button",
+          {
+            title: "Add one of the engine's bundled plugins",
+            onclick: addBuiltinPicker,
+          },
+          "+ Built-in…",
+        ),
+        h(
+          "button",
+          {
+            onclick() {
+              if (!cur) return;
+              confirmBox('Delete plugin "' + cur.name + '"?', () => {
+                plugins.splice(plugins.indexOf(cur), 1);
+                cur = plugins[0] || null;
+                touch();
+                redrawList();
+                redrawForm();
+              });
+            },
+          },
+          "Delete",
+        ),
+        h(
+          "button",
+          { class: "mini", title: "Run earlier", onclick: () => move(-1) },
+          "↑",
+        ),
+        h(
+          "button",
+          { class: "mini", title: "Run later", onclick: () => move(1) },
+          "↓",
+        ),
       ),
       list,
-      h("div", { class: "dim" }, "Checked plugins run top-to-bottom at game boot."),
+      h(
+        "div",
+        { class: "dim" },
+        "Checked plugins run top-to-bottom at game boot.",
+      ),
     );
     const form = h("div", { class: "plug-form" }, nameIn, codeTa);
-    redrawList(); redrawForm();
-    modal({ title: "Plugin Manager", wide: true, dismissable: false,
+    redrawList();
+    redrawForm();
+    modal({
+      title: "Plugin Manager",
+      wide: true,
+      dismissable: false,
       content: h("div", { class: "plug-wrap" }, side, form),
-      buttons: [{ label: "btn.close", primary: true }] });
+      buttons: [{ label: "btn.close", primary: true }],
+    });
   }
 
   // ============================ audio manager ============================
   function openAudioManager() {
     let playingTheme = null;
     const seGrid = h("div", { class: "audio-grid" });
-    for (const n of SE_NAMES) seGrid.appendChild(h("button", { onclick() { Sfx.play(n); } }, "▶ " + n));
+    for (const n of SE_NAMES)
+      seGrid.appendChild(
+        h(
+          "button",
+          {
+            onclick() {
+              Sfx.play(n);
+            },
+          },
+          "▶ " + n,
+        ),
+      );
     const musGrid = h("div", { class: "audio-grid" });
     const musBtns = [];
     for (const t of Sfx.THEMES) {
-      const b = h("button", { onclick() {
-        if (playingTheme === t) { Music.stop(); playingTheme = null; }
-        else { Music.play(t); playingTheme = t; }
-        musBtns.forEach((x) => x.b.classList.toggle("playing", x.t === playingTheme));
-      } }, "♪ " + t);
+      const b = h(
+        "button",
+        {
+          onclick() {
+            if (playingTheme === t) {
+              Music.stop();
+              playingTheme = null;
+            } else {
+              Music.play(t);
+              playingTheme = t;
+            }
+            musBtns.forEach((x) =>
+              x.b.classList.toggle("playing", x.t === playingTheme),
+            );
+          },
+        },
+        "♪ " + t,
+      );
       musBtns.push({ t, b });
       musGrid.appendChild(b);
     }
     modal({
       title: "Audio Manager",
       wide: true,
-      content: h("div", null,
-        h("div", { class: "subhead" }, "Sound effects (used by the Play Sound event command)"),
+      content: h(
+        "div",
+        null,
+        h(
+          "div",
+          { class: "subhead" },
+          "Sound effects (used by the Play Sound event command)",
+        ),
         seGrid,
-        h("div", { class: "subhead" }, "Music themes (click to preview, click again to stop)"),
+        h(
+          "div",
+          { class: "subhead" },
+          "Music themes (click to preview, click again to stop)",
+        ),
         musGrid,
-        h("div", { class: "dim", style: "margin-top:10px" },
-          "Assign a theme per map in Map Properties. Battles always use “battle”, the title screen “title”, defeat “gameover”. All audio is generated procedurally — no files, no copyright."),
+        h(
+          "div",
+          { class: "dim", style: "margin-top:10px" },
+          "Assign a theme per map in Map Properties. Battles always use “battle”, the title screen “title”, defeat “gameover”. All audio is generated procedurally — no files, no copyright.",
+        ),
       ),
-      onClose() { Music.stop(); },
+      onClose() {
+        Music.stop();
+      },
     });
   }
 
@@ -4738,14 +8678,25 @@ atlas.onMapLoad((map) => {
   function walkCommands(list, cb) {
     for (const c of list || []) {
       cb(c);
-      if (c.t === "if") { walkCommands(c.then, cb); walkCommands(c.else, cb); }
-      else if (c.t === "choices") (c.branches || []).forEach((b) => walkCommands(b, cb));
+      if (c.t === "if") {
+        walkCommands(c.then, cb);
+        walkCommands(c.else, cb);
+      } else if (c.t === "choices")
+        (c.branches || []).forEach((b) => walkCommands(b, cb));
     }
   }
   function openEventSearcher() {
     const results = h("div", { class: "search-results" });
-    const input = h("input", { type: "text", placeholder: "Search…", onkeydown(e) { if (e.key === "Enter") run(); } });
-    const kindSel = h("select", null,
+    const input = h("input", {
+      type: "text",
+      placeholder: "Search…",
+      onkeydown(e) {
+        if (e.key === "Enter") run();
+      },
+    });
+    const kindSel = h(
+      "select",
+      null,
       h("option", { value: "text" }, "Message text"),
       h("option", { value: "name" }, "Event name"),
       h("option", { value: "switch" }, "Switch ID"),
@@ -4757,8 +8708,19 @@ atlas.onMapLoad((map) => {
       const query = input.value.trim();
       const idQ = Number(query);
       results.innerHTML = "";
-      if (!query || ((kind === "switch" || kind === "var") && (!idQ || isNaN(idQ)))) {
-        results.appendChild(h("div", { class: "search-row dim" }, kind === "switch" || kind === "var" ? "Enter a numeric ID." : "Enter a search term."));
+      if (
+        !query ||
+        ((kind === "switch" || kind === "var") && (!idQ || isNaN(idQ)))
+      ) {
+        results.appendChild(
+          h(
+            "div",
+            { class: "search-row dim" },
+            kind === "switch" || kind === "var"
+              ? "Enter a numeric ID."
+              : "Enter a search term.",
+          ),
+        );
         return;
       }
       const ql = query.toLowerCase();
@@ -4772,22 +8734,46 @@ atlas.onMapLoad((map) => {
             } else if (kind === "text") {
               walkCommands(pg.commands, (c) => {
                 if (hit) return;
-                if (c.t === "text" && ((c.text || "") + " " + (c.name || "")).toLowerCase().includes(ql)) hit = "“" + c.text.split("\n")[0].slice(0, 50) + "”";
-                else if (c.t === "choices" && c.options.some((o) => o.toLowerCase().includes(ql))) hit = "Choices: " + c.options.join(" / ");
+                if (
+                  c.t === "text" &&
+                  ((c.text || "") + " " + (c.name || ""))
+                    .toLowerCase()
+                    .includes(ql)
+                )
+                  hit = "“" + c.text.split("\n")[0].slice(0, 50) + "”";
+                else if (
+                  c.t === "choices" &&
+                  c.options.some((o) => o.toLowerCase().includes(ql))
+                )
+                  hit = "Choices: " + c.options.join(" / ");
               });
             } else if (kind === "switch") {
               if (pg.cond.switchId === idQ) hit = "page condition (switch ON)";
               walkCommands(pg.commands, (c) => {
                 if (hit) return;
-                if (c.t === "switch" && c.id === idQ) hit = "Control Switch command";
-                else if (c.t === "if" && c.cond && c.cond.kind === "switch" && c.cond.id === idQ) hit = "Conditional Branch";
+                if (c.t === "switch" && c.id === idQ)
+                  hit = "Control Switch command";
+                else if (
+                  c.t === "if" &&
+                  c.cond &&
+                  c.cond.kind === "switch" &&
+                  c.cond.id === idQ
+                )
+                  hit = "Conditional Branch";
               });
             } else {
               if (pg.cond.varId === idQ) hit = "page condition (variable ≥)";
               walkCommands(pg.commands, (c) => {
                 if (hit) return;
-                if (c.t === "var" && c.id === idQ) hit = "Control Variable command";
-                else if (c.t === "if" && c.cond && c.cond.kind === "var" && c.cond.id === idQ) hit = "Conditional Branch";
+                if (c.t === "var" && c.id === idQ)
+                  hit = "Control Variable command";
+                else if (
+                  c.t === "if" &&
+                  c.cond &&
+                  c.cond.kind === "var" &&
+                  c.cond.id === idQ
+                )
+                  hit = "Conditional Branch";
               });
             }
             if (hit != null) matches.push({ m, ev, pi, hit });
@@ -4795,30 +8781,50 @@ atlas.onMapLoad((map) => {
         }
       }
       if (!matches.length) {
-        results.appendChild(h("div", { class: "search-row dim" }, "No matches."));
+        results.appendChild(
+          h("div", { class: "search-row dim" }, "No matches."),
+        );
         return;
       }
       for (const r of matches) {
-        results.appendChild(h("div", { class: "search-row", onclick() {
-          dlg.close();
-          curMapId = r.m.id;
-          setMode("event");
-          selectedEvent = r.ev;
-          rebuildMapList(); renderMap(); refreshToolbar();
-          const sc = $("mapscroll");
-          sc.scrollLeft = r.ev.x * TILE * zoom - sc.clientWidth / 2;
-          sc.scrollTop = r.ev.y * TILE * zoom - sc.clientHeight / 2;
-          openEventEditor(r.ev);
-        } },
-          h("b", null, r.m.name + " — " + r.ev.name),
-          " (" + r.ev.x + "," + r.ev.y + ") page " + (r.pi + 1),
-          h("span", { class: "dim" }, r.hit)));
+        results.appendChild(
+          h(
+            "div",
+            {
+              class: "search-row",
+              onclick() {
+                dlg.close();
+                curMapId = r.m.id;
+                setMode("event");
+                selectedEvent = r.ev;
+                rebuildMapList();
+                renderMap();
+                refreshToolbar();
+                const sc = $("mapscroll");
+                sc.scrollLeft = r.ev.x * TILE * zoom - sc.clientWidth / 2;
+                sc.scrollTop = r.ev.y * TILE * zoom - sc.clientHeight / 2;
+                openEventEditor(r.ev);
+              },
+            },
+            h("b", null, r.m.name + " — " + r.ev.name),
+            " (" + r.ev.x + "," + r.ev.y + ") page " + (r.pi + 1),
+            h("span", { class: "dim" }, r.hit),
+          ),
+        );
       }
     }
-    const bar = h("div", { class: "search-bar" },
-      field("Find", input), field("In", kindSel),
-      h("button", { class: "primary", onclick: run }, "Search"));
-    dlg = modal({ title: "Event Searcher", wide: true, content: h("div", null, bar, results) });
+    const bar = h(
+      "div",
+      { class: "search-bar" },
+      field("Find", input),
+      field("In", kindSel),
+      h("button", { class: "primary", onclick: run }, "Search"),
+    );
+    dlg = modal({
+      title: "Event Searcher",
+      wide: true,
+      content: h("div", null, bar, results),
+    });
     setTimeout(() => input.focus(), 50);
   }
 
@@ -4842,74 +8848,189 @@ atlas.onMapLoad((map) => {
     const tabBar = h("div", { class: "tabs" });
     const body = h("div");
     function resCell(canvas, name, dlName, dlCanvas) {
-      return h("div", { class: "res-cell" },
+      return h(
+        "div",
+        { class: "res-cell" },
         canvas,
         h("span", { class: "res-name", title: name }, name),
-        h("button", { class: "mini", onclick() { downloadCanvas(dlCanvas || canvas, dlName); } }, "PNG"));
+        h(
+          "button",
+          {
+            class: "mini",
+            onclick() {
+              downloadCanvas(dlCanvas || canvas, dlName);
+            },
+          },
+          "PNG",
+        ),
+      );
     }
     const tabs = [
-      { label: "Tiles", build() {
-        const grid = h("div", { class: "res-grid" });
-        Assets.tiles.forEach((t, i) => {
-          if (i === 0) return;
-          grid.appendChild(resCell(copyCanvas(Assets.tileCanvas(i)), t.name + (t.pass ? " ○" : " ✕"), "tile-" + t.key, Assets.tileCanvas(i)));
-        });
-        return h("div", null,
-          h("div", { style: "margin-bottom:8px" },
-            h("button", { onclick() { downloadCanvas(Assets.tilesetCanvas(), "rpgatlas-tileset"); } }, "Export full tileset PNG"),
-            h("span", { class: "dim" }, "  ○ = passable, ✕ = blocked (override per map in Passability mode)")),
-          grid);
-      } },
-      { label: "Characters", build() {
-        const grid = h("div", { class: "res-grid" });
-        Assets.charsets.forEach((cs, i) => {
-          grid.appendChild(resCell(copyCanvas(Assets.charFrameCanvas(i, 0, 1), 1.5),
-            cs.name + (cs.custom ? " ★" : ""), "char-" + cs.key, Assets.charSheetCanvas(i)));
-        });
-        return h("div", null,
-          h("div", { class: "dim", style: "margin-bottom:8px" }, "PNG exports the full 3-frame × 4-direction walking sheet. ★ = made in the Character Generator."),
-          grid);
-      } },
-      { label: "Enemies", build() {
-        const grid = h("div", { class: "res-grid" });
-        for (const e of proj.enemies) {
-          grid.appendChild(resCell(copyCanvas(Assets.enemyCanvas(e.sprite, e.color, 96)),
-            e.name, "enemy-" + e.name.toLowerCase().replace(/\W+/g, "-"), Assets.enemyCanvas(e.sprite, e.color, 264)));
-        }
-        return h("div", null,
-          h("div", { class: "dim", style: "margin-bottom:8px" }, "Battlers from this project's Enemies database (edit them in the Database)."),
-          grid);
-      } },
-      { label: "Icons", build() {
-        const grid = h("div", { class: "res-grid" });
-        for (let i = 0; i < Assets.ICON_COUNT; i++) {
-          grid.appendChild(resCell(copyCanvas(Assets.iconCanvas(i), 1.5),
-            "Icon " + i, "icon-" + String(i).padStart(2, "0"), Assets.iconCanvas(i)));
-        }
-        return h("div", null,
-          h("div", { class: "dim", style: "margin-bottom:8px" },
-            "64 icons from img/system/icon_set.png. Assign them in the Classes, Skills, Items, Weapons, and Armors tabs."),
-          grid);
-      } },
+      {
+        label: "Tiles",
+        build() {
+          const grid = h("div", { class: "res-grid" });
+          Assets.tiles.forEach((t, i) => {
+            if (i === 0) return;
+            grid.appendChild(
+              resCell(
+                copyCanvas(Assets.tileCanvas(i)),
+                t.name + (t.pass ? " ○" : " ✕"),
+                "tile-" + t.key,
+                Assets.tileCanvas(i),
+              ),
+            );
+          });
+          return h(
+            "div",
+            null,
+            h(
+              "div",
+              { style: "margin-bottom:8px" },
+              h(
+                "button",
+                {
+                  onclick() {
+                    downloadCanvas(Assets.tilesetCanvas(), "rpgatlas-tileset");
+                  },
+                },
+                "Export full tileset PNG",
+              ),
+              h(
+                "span",
+                { class: "dim" },
+                "  ○ = passable, ✕ = blocked (override per map in Passability mode)",
+              ),
+            ),
+            grid,
+          );
+        },
+      },
+      {
+        label: "Characters",
+        build() {
+          const grid = h("div", { class: "res-grid" });
+          Assets.charsets.forEach((cs, i) => {
+            grid.appendChild(
+              resCell(
+                copyCanvas(Assets.charFrameCanvas(i, 0, 1), 1.5),
+                cs.name + (cs.custom ? " ★" : ""),
+                "char-" + cs.key,
+                Assets.charSheetCanvas(i),
+              ),
+            );
+          });
+          return h(
+            "div",
+            null,
+            h(
+              "div",
+              { class: "dim", style: "margin-bottom:8px" },
+              "PNG exports the full 3-frame × 4-direction walking sheet. ★ = made in the Character Generator.",
+            ),
+            grid,
+          );
+        },
+      },
+      {
+        label: "Enemies",
+        build() {
+          const grid = h("div", { class: "res-grid" });
+          for (const e of proj.enemies) {
+            grid.appendChild(
+              resCell(
+                copyCanvas(Assets.enemyCanvas(e.sprite, e.color, 96)),
+                e.name,
+                "enemy-" + e.name.toLowerCase().replace(/\W+/g, "-"),
+                Assets.enemyCanvas(e.sprite, e.color, 264),
+              ),
+            );
+          }
+          return h(
+            "div",
+            null,
+            h(
+              "div",
+              { class: "dim", style: "margin-bottom:8px" },
+              "Battlers from this project's Enemies database (edit them in the Database).",
+            ),
+            grid,
+          );
+        },
+      },
+      {
+        label: "Icons",
+        build() {
+          const grid = h("div", { class: "res-grid" });
+          for (let i = 0; i < Assets.ICON_COUNT; i++) {
+            grid.appendChild(
+              resCell(
+                copyCanvas(Assets.iconCanvas(i), 1.5),
+                "Icon " + i,
+                "icon-" + String(i).padStart(2, "0"),
+                Assets.iconCanvas(i),
+              ),
+            );
+          }
+          return h(
+            "div",
+            null,
+            h(
+              "div",
+              { class: "dim", style: "margin-bottom:8px" },
+              "64 icons from img/system/icon_set.png. Assign them in the Classes, Skills, Items, Weapons, and Armors tabs.",
+            ),
+            grid,
+          );
+        },
+      },
     ];
     function show(i) {
-      tabBar.querySelectorAll("button").forEach((b, bi) => b.classList.toggle("sel", bi === i));
+      tabBar
+        .querySelectorAll("button")
+        .forEach((b, bi) => b.classList.toggle("sel", bi === i));
       body.innerHTML = "";
       body.appendChild(tabs[i].build());
     }
-    tabs.forEach((t, i) => tabBar.appendChild(h("button", { onclick: () => show(i) }, t.label)));
-    modal({ title: "Resource Manager", wide: true, content: h("div", null, tabBar, body) });
+    tabs.forEach((t, i) =>
+      tabBar.appendChild(h("button", { onclick: () => show(i) }, t.label)),
+    );
+    modal({
+      title: "Resource Manager",
+      wide: true,
+      content: h("div", null, tabBar, body),
+    });
     show(0);
   }
 
   // ============================ character generator ============================
   function openCharGenerator() {
-    const SKINS = ["#f0c8a0", "#e8b890", "#d8a070", "#c08858", "#9a6a40", "#f0d0b0"];
+    const SKINS = [
+      "#f0c8a0",
+      "#e8b890",
+      "#d8a070",
+      "#c08858",
+      "#9a6a40",
+      "#f0d0b0",
+    ];
     const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
-    const randCol = () => "#" + [0, 0, 0].map(() => ("0" + Math.floor(40 + Math.random() * 200).toString(16)).slice(-2)).join("");
+    const randCol = () =>
+      "#" +
+      [0, 0, 0]
+        .map(() =>
+          ("0" + Math.floor(40 + Math.random() * 200).toString(16)).slice(-2),
+        )
+        .join("");
     function randomWork() {
-      return { name: "New Hero", style: pick(Assets.HAIR_STYLES), skin: pick(SKINS),
-        hair: randCol(), shirt: randCol(), pants: randCol(), hat: randCol() };
+      return {
+        name: "New Hero",
+        style: pick(Assets.HAIR_STYLES),
+        skin: pick(SKINS),
+        hair: randCol(),
+        shirt: randCol(),
+        pants: randCol(),
+        hat: randCol(),
+      };
     }
     let editing = null; // entry in proj.customChars being edited, or null for a new one
     let work = randomWork();
@@ -4918,10 +9039,20 @@ atlas.onMapLoad((map) => {
 
     const previews = [0, 1, 2, 3].map(() => {
       const c = document.createElement("canvas");
-      c.width = TILE; c.height = TILE;
+      c.width = TILE;
+      c.height = TILE;
       return c;
     });
-    function paramsOf(w) { return { skin: w.skin, hair: w.hair, style: w.style, shirt: w.shirt, pants: w.pants, hat: w.hat }; }
+    function paramsOf(w) {
+      return {
+        skin: w.skin,
+        hair: w.hair,
+        style: w.style,
+        shirt: w.shirt,
+        pants: w.pants,
+        hat: w.hat,
+      };
+    }
     function redrawPreview() {
       const idx = Assets.registerHuman(PV_KEY, "preview", paramsOf(work));
       const frame = [0, 1, 2, 1][animF % 4];
@@ -4931,29 +9062,113 @@ atlas.onMapLoad((map) => {
         g.drawImage(Assets.charFrameCanvas(idx, dir, frame), 0, 0);
       });
     }
-    const animTimer = setInterval(() => { animF++; redrawPreview(); }, 170);
+    const animTimer = setInterval(() => {
+      animF++;
+      redrawPreview();
+    }, 170);
 
     const formBox = h("div", { class: "cg-form" });
     const listEl = h("ul", { class: "dblist" });
     function colorIn(key) {
-      return h("input", { type: "color", value: work[key], oninput(e) { work[key] = e.target.value; redrawPreview(); } });
+      return h("input", {
+        type: "color",
+        value: work[key],
+        oninput(e) {
+          work[key] = e.target.value;
+          redrawPreview();
+        },
+      });
     }
     function redrawForm() {
       formBox.innerHTML = "";
-      const nameIn = h("input", { type: "text", value: work.name, oninput(e) { work.name = e.target.value; } });
-      const styleSel = h("select", { onchange(e) { work.style = e.target.value; redrawPreview(); } },
-        ...Assets.HAIR_STYLES.map((s) => h("option", { value: s, ...(s === work.style ? { selected: "" } : {}) }, s)));
-      const skinSel = h("select", { onchange(e) { work.skin = e.target.value; redrawPreview(); } },
-        ...SKINS.map((s, i) => h("option", { value: s, ...(s === work.skin ? { selected: "" } : {}) }, "skin " + (i + 1))));
-      formBox.appendChild(row(field("Name", nameIn), field("Hair style", styleSel)));
-      formBox.appendChild(row(field("Skin", skinSel), field("Hair", colorIn("hair")),
-        field("Shirt", colorIn("shirt")), field("Pants", colorIn("pants")), field("Hat", colorIn("hat"))));
+      const nameIn = h("input", {
+        type: "text",
+        value: work.name,
+        oninput(e) {
+          work.name = e.target.value;
+        },
+      });
+      const styleSel = h(
+        "select",
+        {
+          onchange(e) {
+            work.style = e.target.value;
+            redrawPreview();
+          },
+        },
+        ...Assets.HAIR_STYLES.map((s) =>
+          h(
+            "option",
+            { value: s, ...(s === work.style ? { selected: "" } : {}) },
+            s,
+          ),
+        ),
+      );
+      const skinSel = h(
+        "select",
+        {
+          onchange(e) {
+            work.skin = e.target.value;
+            redrawPreview();
+          },
+        },
+        ...SKINS.map((s, i) =>
+          h(
+            "option",
+            { value: s, ...(s === work.skin ? { selected: "" } : {}) },
+            "skin " + (i + 1),
+          ),
+        ),
+      );
+      formBox.appendChild(
+        row(field("Name", nameIn), field("Hair style", styleSel)),
+      );
+      formBox.appendChild(
+        row(
+          field("Skin", skinSel),
+          field("Hair", colorIn("hair")),
+          field("Shirt", colorIn("shirt")),
+          field("Pants", colorIn("pants")),
+          field("Hat", colorIn("hat")),
+        ),
+      );
       formBox.appendChild(h("div", { class: "cg-preview" }, ...previews));
-      formBox.appendChild(h("div", { class: "frow", style: "margin-top:8px; gap:6px" },
-        h("button", { onclick() { const n = work.name; work = randomWork(); work.name = n; redrawForm(); redrawPreview(); } }, "🎲 Randomize"),
-        h("button", { class: "primary", onclick: save }, editing ? "Update “" + editing.name + "”" : "Save as new character"),
-        editing ? h("button", { onclick() { editing = null; redrawForm(); } }, "Cancel edit") : null,
-      ));
+      formBox.appendChild(
+        h(
+          "div",
+          { class: "frow", style: "margin-top:8px; gap:6px" },
+          h(
+            "button",
+            {
+              onclick() {
+                const n = work.name;
+                work = randomWork();
+                work.name = n;
+                redrawForm();
+                redrawPreview();
+              },
+            },
+            "🎲 Randomize",
+          ),
+          h(
+            "button",
+            { class: "primary", onclick: save },
+            editing ? "Update “" + editing.name + "”" : "Save as new character",
+          ),
+          editing
+            ? h(
+                "button",
+                {
+                  onclick() {
+                    editing = null;
+                    redrawForm();
+                  },
+                },
+                "Cancel edit",
+              )
+            : null,
+        ),
+      );
     }
     function save() {
       if (!work.name.trim()) work.name = "Hero";
@@ -4962,42 +9177,83 @@ atlas.onMapLoad((map) => {
         editing.params = paramsOf(work);
         Assets.registerHuman(editing.key, editing.name, editing.params);
       } else {
-        const id = RA.nextId(proj.customChars.length ? proj.customChars : [{ id: 0 }]);
-        const entry = { id, key: "cg" + id, name: work.name, params: paramsOf(work) };
+        const id = RA.nextId(
+          proj.customChars.length ? proj.customChars : [{ id: 0 }],
+        );
+        const entry = {
+          id,
+          key: "cg" + id,
+          name: work.name,
+          params: paramsOf(work),
+        };
         proj.customChars.push(entry);
         Assets.registerHuman(entry.key, entry.name, entry.params);
         editing = entry;
       }
       touch();
-      redrawList(); redrawForm();
+      redrawList();
+      redrawForm();
       flashStatus(t("status.char_saved"));
     }
     function redrawList() {
       listEl.innerHTML = "";
       for (const c of proj.customChars) {
-        listEl.appendChild(h("li", { class: c === editing ? "sel" : "", onclick() {
-          editing = c;
-          work = Object.assign({ name: c.name }, c.params);
-          redrawForm(); redrawPreview();
-        } }, c.name));
+        listEl.appendChild(
+          h(
+            "li",
+            {
+              class: c === editing ? "sel" : "",
+              onclick() {
+                editing = c;
+                work = Object.assign({ name: c.name }, c.params);
+                redrawForm();
+                redrawPreview();
+              },
+            },
+            c.name,
+          ),
+        );
       }
-      if (!proj.customChars.length) listEl.appendChild(h("li", { class: "dim" }, "(none yet)"));
+      if (!proj.customChars.length)
+        listEl.appendChild(h("li", { class: "dim" }, "(none yet)"));
     }
-    const side = h("div", { class: "cg-side" },
+    const side = h(
+      "div",
+      { class: "cg-side" },
       h("div", { class: "subhead", style: "margin:0" }, "Saved characters"),
       listEl,
-      h("button", { onclick() {
-        if (!editing) return;
-        confirmBox('Delete "' + editing.name + '"? Actors/events using it will show no sprite.', () => {
-          Assets.removeCharset(editing.key);
-          proj.customChars.splice(proj.customChars.indexOf(editing), 1);
-          editing = null;
-          touch(); redrawList(); redrawForm(); renderMap();
-        });
-      } }, "Delete selected"),
-      h("div", { class: "dim" }, "Saved characters appear in every sprite picker (marked ★ in the Resource Manager)."),
+      h(
+        "button",
+        {
+          onclick() {
+            if (!editing) return;
+            confirmBox(
+              'Delete "' +
+                editing.name +
+                '"? Actors/events using it will show no sprite.',
+              () => {
+                Assets.removeCharset(editing.key);
+                proj.customChars.splice(proj.customChars.indexOf(editing), 1);
+                editing = null;
+                touch();
+                redrawList();
+                redrawForm();
+                renderMap();
+              },
+            );
+          },
+        },
+        "Delete selected",
+      ),
+      h(
+        "div",
+        { class: "dim" },
+        "Saved characters appear in every sprite picker (marked ★ in the Resource Manager).",
+      ),
     );
-    redrawList(); redrawForm(); redrawPreview();
+    redrawList();
+    redrawForm();
+    redrawPreview();
     modal({
       title: "dialog.char_generator",
       wide: true,
@@ -5020,27 +9276,52 @@ atlas.onMapLoad((map) => {
     refreshToolbar();
     setStatus();
     const saveIndicator = $("save-ind");
-    if (saveIndicator.textContent.startsWith("●")) saveIndicator.textContent = "● " + t("status.unsaved");
-    else if (saveIndicator.textContent.startsWith("⚠")) saveIndicator.textContent = "⚠ " + t("status.save_failed");
+    if (saveIndicator.textContent.startsWith("●"))
+      saveIndicator.textContent = "● " + t("status.unsaved");
+    else if (saveIndicator.textContent.startsWith("⚠"))
+      saveIndicator.textContent = "⚠ " + t("status.save_failed");
     else saveIndicator.textContent = "✓ " + t("status.saved");
   }
   function openLanguageSettings() {
     let selectedLocale = editorI18n.locale;
-    const languageSelect = h("select", {
-      onchange(e) { selectedLocale = e.target.value; },
-    }, ...editorI18n.locales().map((locale) =>
-      h("option", { value: locale.id, ...(locale.id === selectedLocale ? { selected: "" } : {}) }, locale.label)));
+    const languageSelect = h(
+      "select",
+      {
+        onchange(e) {
+          selectedLocale = e.target.value;
+        },
+      },
+      ...editorI18n
+        .locales()
+        .map((locale) =>
+          h(
+            "option",
+            {
+              value: locale.id,
+              ...(locale.id === selectedLocale ? { selected: "" } : {}),
+            },
+            locale.label,
+          ),
+        ),
+    );
     modal({
       title: "dialog.interface_language",
-      content: h("div", null,
+      content: h(
+        "div",
+        null,
         h("p", null, t("lang.choose")),
-        field("label.language", languageSelect)),
+        field("label.language", languageSelect),
+      ),
       buttons: [
-        { label: "btn.apply", primary: true, onClick(close) {
-          editorI18n.setLocale(selectedLocale);
-          close();
-          refreshLocalizedChrome();
-        } },
+        {
+          label: "btn.apply",
+          primary: true,
+          onClick(close) {
+            editorI18n.setLocale(selectedLocale);
+            close();
+            refreshLocalizedChrome();
+          },
+        },
         { label: "btn.cancel" },
       ],
     });
@@ -5049,13 +9330,23 @@ atlas.onMapLoad((map) => {
     const list = h("div", { class: "patch-notes" });
     PATCH_NOTES.forEach((note) => {
       const items = h("ul");
-      (note.items || []).forEach((item) => items.appendChild(h("li", null, item)));
-      list.appendChild(h("article", { class: "patch-note" },
-        h("div", { class: "patch-note-head" },
-          h("h3", null, note.title),
-          h("time", null, note.date)),
-        h("p", null, note.summary),
-        items));
+      (note.items || []).forEach((item) =>
+        items.appendChild(h("li", null, item)),
+      );
+      list.appendChild(
+        h(
+          "article",
+          { class: "patch-note" },
+          h(
+            "div",
+            { class: "patch-note-head" },
+            h("h3", null, note.title),
+            h("time", null, note.date),
+          ),
+          h("p", null, note.summary),
+          items,
+        ),
+      );
     });
     modal({
       title: "RPGAtlas - Patch Notes",
@@ -5068,7 +9359,9 @@ atlas.onMapLoad((map) => {
     modal({
       title: "RPGAtlas — Quick Help",
       wide: true,
-      content: h("div", { class: "helpbox", html: `
+      content: h("div", {
+        class: "helpbox",
+        html: `
 <h3>Drawing maps</h3>
 <ul>
 <li><b>Tools</b>: Pen <kbd>B</kbd>, Eraser <kbd>E</kbd>, Rectangle <kbd>R</kbd>, Circle <kbd>O</kbd>, Fill <kbd>F</kbd>, Shadow Pen <kbd>S</kbd>. Right-click = pick tile from the map.</li>
@@ -5108,13 +9401,16 @@ atlas.onMapLoad((map) => {
 </ul>
 <h3>License</h3>
 <p>RPGAtlas is free and open source software under the <b>GNU GPLv3</b>. The content you create — maps, story, database, characters — is yours. Exported games bundle the engine runtime, which stays under the GPL (its readable source ships inside every export).</p>
-` }),
+`,
+      }),
     });
   }
   function openAbout() {
     modal({
       title: "About RPGAtlas",
-      content: h("div", { class: "helpbox", html: `
+      content: h("div", {
+        class: "helpbox",
+        html: `
 <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px">
   <img src="img/system/rpgatlas-logo.svg" alt="" width="56" height="56">
   <div>
@@ -5129,52 +9425,128 @@ atlas.onMapLoad((map) => {
 <li>Your game's content (maps, story, data, art) is yours — sell it, remix it, no credit required. Exported games include the engine runtime, which remains GPL-licensed.</li>
 </ul>
 <p class="dim">Editor: index.html · Player: play.html · Data: one portable .json project file.</p>
-` }),
+`,
+      }),
     });
   }
 
   // ============================ icons (original line art) ============================
   function svgIcon(inner) {
-    return '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">' + inner + "</svg>";
+    return (
+      '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">' +
+      inner +
+      "</svg>"
+    );
   }
-  const layerGlyph = '<path d="M10 2.6 17.4 6.6 10 10.6 2.6 6.6z"/><path d="M2.6 10.4 10 14.4l7.4-4"/>';
+  const layerGlyph =
+    '<path d="M10 2.6 17.4 6.6 10 10.6 2.6 6.6z"/><path d="M2.6 10.4 10 14.4l7.4-4"/>';
   const ICONS = {
-    new: svgIcon('<path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5"/><path d="M10 9.5v5M7.5 12h5"/>'),
-    open: svgIcon('<path d="M2.5 16V4.5h5l2 2h8V9"/><path d="M2.5 16l2.8-7h13.2l-2.8 7z"/>'),
-    save: svgIcon('<path d="M3 3h11.5L17 5.5V17H3z"/><path d="M6 3v4.5h7V3"/><rect x="6" y="11" width="8" height="6"/>'),
-    cut: svgIcon('<circle cx="5.2" cy="14.8" r="2.3"/><circle cx="14.8" cy="14.8" r="2.3"/><path d="M6.8 13 15 2.5M13.2 13 5 2.5"/>'),
-    copy: svgIcon('<rect x="7" y="6" width="10" height="11.5" rx="1.5"/><path d="M4 13.5V4a1.5 1.5 0 0 1 1.5-1.5H13"/>'),
-    paste: svgIcon('<rect x="4" y="4.5" width="12" height="13" rx="1.5"/><path d="M7.2 4.5a2.8 2.8 0 0 1 5.6 0"/><rect x="7" y="3.2" width="6" height="2.8" rx="1"/><path d="M7 10.5h6M7 13.5h6"/>'),
-    undo: svgIcon('<path d="M4 8.5h8.5a3.8 3.8 0 0 1 0 7.6H8"/><path d="M7 5 3.5 8.5 7 12"/>'),
-    redo: svgIcon('<path d="M16 8.5H7.5a3.8 3.8 0 0 0 0 7.6H12"/><path d="M13 5l3.5 3.5L13 12"/>'),
-    map: svgIcon('<rect x="3" y="3" width="14" height="14"/><path d="M3 9.7h14M9.7 3v14"/>'),
-    event: svgIcon('<circle cx="10" cy="6.3" r="3.1"/><path d="M4.2 17c.5-4 2.9-5.6 5.8-5.6s5.3 1.6 5.8 5.6"/>'),
-    pass: svgIcon('<circle cx="6.8" cy="6.8" r="4"/><path d="M11.8 11.8l5.5 5.5M17.3 11.8l-5.5 5.5"/>'),
-    pen: svgIcon('<path d="M3.5 16.5l.9-3.6L13.6 3.7l2.7 2.7L7.1 15.6l-3.6.9z"/><path d="M12 5.3l2.7 2.7"/>'),
-    erase: svgIcon('<path d="M7.5 15.5 3.6 11.6a1.5 1.5 0 0 1 0-2.1l6-6a1.5 1.5 0 0 1 2.1 0l4.8 4.8a1.5 1.5 0 0 1 0 2.1l-5.1 5.1H7.5z"/><path d="M3.5 17.5h13"/><path d="M7.1 6.9l6 6"/>'),
+    new: svgIcon(
+      '<path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5"/><path d="M10 9.5v5M7.5 12h5"/>',
+    ),
+    open: svgIcon(
+      '<path d="M2.5 16V4.5h5l2 2h8V9"/><path d="M2.5 16l2.8-7h13.2l-2.8 7z"/>',
+    ),
+    save: svgIcon(
+      '<path d="M3 3h11.5L17 5.5V17H3z"/><path d="M6 3v4.5h7V3"/><rect x="6" y="11" width="8" height="6"/>',
+    ),
+    cut: svgIcon(
+      '<circle cx="5.2" cy="14.8" r="2.3"/><circle cx="14.8" cy="14.8" r="2.3"/><path d="M6.8 13 15 2.5M13.2 13 5 2.5"/>',
+    ),
+    copy: svgIcon(
+      '<rect x="7" y="6" width="10" height="11.5" rx="1.5"/><path d="M4 13.5V4a1.5 1.5 0 0 1 1.5-1.5H13"/>',
+    ),
+    paste: svgIcon(
+      '<rect x="4" y="4.5" width="12" height="13" rx="1.5"/><path d="M7.2 4.5a2.8 2.8 0 0 1 5.6 0"/><rect x="7" y="3.2" width="6" height="2.8" rx="1"/><path d="M7 10.5h6M7 13.5h6"/>',
+    ),
+    undo: svgIcon(
+      '<path d="M4 8.5h8.5a3.8 3.8 0 0 1 0 7.6H8"/><path d="M7 5 3.5 8.5 7 12"/>',
+    ),
+    redo: svgIcon(
+      '<path d="M16 8.5H7.5a3.8 3.8 0 0 0 0 7.6H12"/><path d="M13 5l3.5 3.5L13 12"/>',
+    ),
+    map: svgIcon(
+      '<rect x="3" y="3" width="14" height="14"/><path d="M3 9.7h14M9.7 3v14"/>',
+    ),
+    event: svgIcon(
+      '<circle cx="10" cy="6.3" r="3.1"/><path d="M4.2 17c.5-4 2.9-5.6 5.8-5.6s5.3 1.6 5.8 5.6"/>',
+    ),
+    pass: svgIcon(
+      '<circle cx="6.8" cy="6.8" r="4"/><path d="M11.8 11.8l5.5 5.5M17.3 11.8l-5.5 5.5"/>',
+    ),
+    pen: svgIcon(
+      '<path d="M3.5 16.5l.9-3.6L13.6 3.7l2.7 2.7L7.1 15.6l-3.6.9z"/><path d="M12 5.3l2.7 2.7"/>',
+    ),
+    erase: svgIcon(
+      '<path d="M7.5 15.5 3.6 11.6a1.5 1.5 0 0 1 0-2.1l6-6a1.5 1.5 0 0 1 2.1 0l4.8 4.8a1.5 1.5 0 0 1 0 2.1l-5.1 5.1H7.5z"/><path d="M3.5 17.5h13"/><path d="M7.1 6.9l6 6"/>',
+    ),
     rect: svgIcon('<rect x="3.5" y="5" width="13" height="10"/>'),
     circle: svgIcon('<ellipse cx="10" cy="10" rx="6.6" ry="5.2"/>'),
-    fill: svgIcon('<path d="M8.2 2.2v2.6"/><path d="M8.2 3.8l6.2 6.2L9 15.4 3.4 9.8z"/><path d="M16.2 12.8s1.7 2.1 1.7 3.3a1.7 1.7 0 1 1-3.4 0c0-1.2 1.7-3.3 1.7-3.3z"/>'),
-    shadow: svgIcon('<rect x="3.5" y="3.5" width="13" height="13"/><path d="M16.5 3.5 3.5 16.5"/><path d="M16.5 3.5v13h-13z" fill="currentColor" stroke="none" opacity="0.45"/>'),
-    height: svgIcon('<path d="M3 16.5h4v-4h4v-4h4v-5"/><path d="M12.5 6 15 3.5 17.5 6"/>'),
-    hd2d: svgIcon('<path d="M2.5 14.5l5-8 4 6 2-3 4 5"/><path d="M2.5 17h15"/>'),
-    collision: svgIcon('<path d="M10 2.5l7.2 4.2v8.3L10 19.5l-7.2-4.5V6.7z"/><path d="M10 6.5v6.5M6.8 9.8H13.2"/>'),
-    flags: svgIcon('<rect x="3" y="3" width="14" height="14" rx="1.5"/><path d="M7.5 6v12M12.5 6v12M6 9h9M6 15h9"/>'),
-    zoomin: svgIcon('<circle cx="8.8" cy="8.8" r="5.6"/><path d="M13 13l4.3 4.3"/><path d="M6.3 8.8h5M8.8 6.3v5"/>'),
-    zoomout: svgIcon('<circle cx="8.8" cy="8.8" r="5.6"/><path d="M13 13l4.3 4.3"/><path d="M6.3 8.8h5"/>'),
-    zoom1: svgIcon('<circle cx="8.8" cy="8.8" r="5.6"/><path d="M13 13l4.3 4.3"/><text x="8.8" y="10.9" font-size="5.6" font-weight="bold" text-anchor="middle" fill="currentColor" stroke="none" font-family="monospace">1:1</text>'),
-    db: svgIcon('<ellipse cx="10" cy="4.6" rx="6.4" ry="2.4"/><path d="M3.6 4.6v10.8c0 1.3 2.9 2.4 6.4 2.4s6.4-1.1 6.4-2.4V4.6"/><path d="M3.6 10c0 1.3 2.9 2.4 6.4 2.4s6.4-1.1 6.4-2.4"/>'),
-    plugins: svgIcon('<path d="M8 3.4a2 2 0 0 1 4 0V5h3.2a.8.8 0 0 1 .8.8V9h-1.6a2 2 0 0 0 0 4H16v3.2a.8.8 0 0 1-.8.8H4.8a.8.8 0 0 1-.8-.8V13h1.6a2 2 0 0 0 0-4H4V5.8a.8.8 0 0 1 .8-.8H8z"/>'),
-    audio: svgIcon('<path d="M3 8v4h2.8L10 16V4L5.8 8H3z"/><path d="M12.8 7.2a4 4 0 0 1 0 5.6M15.3 5a7.2 7.2 0 0 1 0 10"/>'),
-    search: svgIcon('<rect x="3" y="2.5" width="9.5" height="13" rx="1"/><path d="M5.6 6h4.3M5.6 9h4.3"/><circle cx="13.6" cy="13.6" r="3.4"/><path d="M16 16l2.4 2.4"/>'),
-    resources: svgIcon('<rect x="3" y="4" width="14" height="12" rx="1.5"/><circle cx="7.4" cy="8.4" r="1.5"/><path d="M3 13.8l4-4 3 3 3.4-3.4 3.6 3.6"/>'),
-    chargen: svgIcon('<circle cx="8" cy="6.5" r="3"/><path d="M2.8 17c.5-3.6 2.6-5.1 5.2-5.1s4.7 1.5 5.2 5.1"/><path d="M15.6 4.6v5M13.1 7.1h5"/>'),
-    play: svgIcon('<path d="M5.5 3.5v13l10.5-6.5z" fill="currentColor" stroke="none"/>'),
-    snap: svgIcon('<path d="M4 4h4v4H4zM12 4h4v4h-4zM4 12h4v4H4zM12 12h4v4h-4z"/>'),
+    fill: svgIcon(
+      '<path d="M8.2 2.2v2.6"/><path d="M8.2 3.8l6.2 6.2L9 15.4 3.4 9.8z"/><path d="M16.2 12.8s1.7 2.1 1.7 3.3a1.7 1.7 0 1 1-3.4 0c0-1.2 1.7-3.3 1.7-3.3z"/>',
+    ),
+    shadow: svgIcon(
+      '<rect x="3.5" y="3.5" width="13" height="13"/><path d="M16.5 3.5 3.5 16.5"/><path d="M16.5 3.5v13h-13z" fill="currentColor" stroke="none" opacity="0.45"/>',
+    ),
+    height: svgIcon(
+      '<path d="M3 16.5h4v-4h4v-4h4v-5"/><path d="M12.5 6 15 3.5 17.5 6"/>',
+    ),
+    hd2d: svgIcon(
+      '<path d="M2.5 14.5l5-8 4 6 2-3 4 5"/><path d="M2.5 17h15"/>',
+    ),
+    collision: svgIcon(
+      '<path d="M10 2.5l7.2 4.2v8.3L10 19.5l-7.2-4.5V6.7z"/><path d="M10 6.5v6.5M6.8 9.8H13.2"/>',
+    ),
+    flags: svgIcon(
+      '<rect x="3" y="3" width="14" height="14" rx="1.5"/><path d="M7.5 6v12M12.5 6v12M6 9h9M6 15h9"/>',
+    ),
+    zoomin: svgIcon(
+      '<circle cx="8.8" cy="8.8" r="5.6"/><path d="M13 13l4.3 4.3"/><path d="M6.3 8.8h5M8.8 6.3v5"/>',
+    ),
+    zoomout: svgIcon(
+      '<circle cx="8.8" cy="8.8" r="5.6"/><path d="M13 13l4.3 4.3"/><path d="M6.3 8.8h5"/>',
+    ),
+    zoom1: svgIcon(
+      '<circle cx="8.8" cy="8.8" r="5.6"/><path d="M13 13l4.3 4.3"/><text x="8.8" y="10.9" font-size="5.6" font-weight="bold" text-anchor="middle" fill="currentColor" stroke="none" font-family="monospace">1:1</text>',
+    ),
+    db: svgIcon(
+      '<ellipse cx="10" cy="4.6" rx="6.4" ry="2.4"/><path d="M3.6 4.6v10.8c0 1.3 2.9 2.4 6.4 2.4s6.4-1.1 6.4-2.4V4.6"/><path d="M3.6 10c0 1.3 2.9 2.4 6.4 2.4s6.4-1.1 6.4-2.4"/>',
+    ),
+    plugins: svgIcon(
+      '<path d="M8 3.4a2 2 0 0 1 4 0V5h3.2a.8.8 0 0 1 .8.8V9h-1.6a2 2 0 0 0 0 4H16v3.2a.8.8 0 0 1-.8.8H4.8a.8.8 0 0 1-.8-.8V13h1.6a2 2 0 0 0 0-4H4V5.8a.8.8 0 0 1 .8-.8H8z"/>',
+    ),
+    audio: svgIcon(
+      '<path d="M3 8v4h2.8L10 16V4L5.8 8H3z"/><path d="M12.8 7.2a4 4 0 0 1 0 5.6M15.3 5a7.2 7.2 0 0 1 0 10"/>',
+    ),
+    search: svgIcon(
+      '<rect x="3" y="2.5" width="9.5" height="13" rx="1"/><path d="M5.6 6h4.3M5.6 9h4.3"/><circle cx="13.6" cy="13.6" r="3.4"/><path d="M16 16l2.4 2.4"/>',
+    ),
+    resources: svgIcon(
+      '<rect x="3" y="4" width="14" height="12" rx="1.5"/><circle cx="7.4" cy="8.4" r="1.5"/><path d="M3 13.8l4-4 3 3 3.4-3.4 3.6 3.6"/>',
+    ),
+    chargen: svgIcon(
+      '<circle cx="8" cy="6.5" r="3"/><path d="M2.8 17c.5-3.6 2.6-5.1 5.2-5.1s4.7 1.5 5.2 5.1"/><path d="M15.6 4.6v5M13.1 7.1h5"/>',
+    ),
+    play: svgIcon(
+      '<path d="M5.5 3.5v13l10.5-6.5z" fill="currentColor" stroke="none"/>',
+    ),
+    snap: svgIcon(
+      '<path d="M4 4h4v4H4zM12 4h4v4h-4zM4 12h4v4H4zM12 12h4v4h-4z"/>',
+    ),
   };
-  [["auto", "A"], ["ground", "1"], ["decor", "2"], ["decor2", "3"], ["over", "4"]].forEach(([ln, glyph]) => {
-    ICONS["layer-" + ln] = svgIcon(layerGlyph +
-      '<text x="15" y="19" font-size="9" font-weight="bold" text-anchor="middle" fill="currentColor" stroke="none">' + glyph + "</text>");
+  [
+    ["auto", "A"],
+    ["ground", "1"],
+    ["decor", "2"],
+    ["decor2", "3"],
+    ["over", "4"],
+  ].forEach(([ln, glyph]) => {
+    ICONS["layer-" + ln] = svgIcon(
+      layerGlyph +
+        '<text x="15" y="19" font-size="9" font-weight="bold" text-anchor="middle" fill="currentColor" stroke="none">' +
+        glyph +
+        "</text>",
+    );
   });
 
   // ============================ actions / menus / toolbar ============================
@@ -5184,8 +9556,12 @@ atlas.onMapLoad((map) => {
     def.tipKey = def.tip;
     ACT[id] = def;
   }
-  function actionLabel(action) { return t(action.labelKey); }
-  function actionTip(action) { return t(action.tipKey || action.labelKey); }
+  function actionLabel(action) {
+    return t(action.labelKey);
+  }
+  function actionTip(action) {
+    return t(action.tipKey || action.labelKey);
+  }
   function runAct(id) {
     const a = ACT[id];
     if (!a || (a.enabled && !a.enabled())) return;
@@ -5193,79 +9569,231 @@ atlas.onMapLoad((map) => {
     refreshToolbar();
   }
 
-  act("new", { label: "action.new_project", icon: "new", tip: "tip.new_project", run() {
-    if (host.isTauri) {
-      openNewProjectDialog();
-    } else {
-      confirmBox(t("dialog.confirm_new_project"), () => {
-        proj = DataDefaults.newProject();
-        Assets.registerCustomChars(proj.customChars);
-        Assets.bindExternalAssets(proj);
-        curMapId = proj.maps[0].id;
-        selectedEvent = null; selection = null; pasteMode = null;
-        undoStack.length = 0; redoStack.length = 0;
-        rebuildAll(); touch();
-      });
-    }
-  } });
-  act("open", { label: "action.open_project", icon: "open", tip: "tip.open_project", run() { $("import-file").click(); } });
-  act("open-folder", { label: "action.open_project_folder", icon: "open", tip: "tip.open_project_folder", run() {
-    openProjectFolderFlow();
-  } });
-  act("save", { label: "action.save_project", icon: "save", key: "Ctrl+S",
+  act("new", {
+    label: "action.new_project",
+    icon: "new",
+    tip: "tip.new_project",
+    run() {
+      if (host.isTauri) {
+        openNewProjectDialog();
+      } else {
+        confirmBox(t("dialog.confirm_new_project"), () => {
+          proj = DataDefaults.newProject();
+          Assets.registerCustomChars(proj.customChars);
+          Assets.bindExternalAssets(proj);
+          curMapId = proj.maps[0].id;
+          selectedEvent = null;
+          selection = null;
+          pasteMode = null;
+          undoStack.length = 0;
+          redoStack.length = 0;
+          rebuildAll();
+          touch();
+        });
+      }
+    },
+  });
+  act("open", {
+    label: "action.open_project",
+    icon: "open",
+    tip: "tip.open_project",
+    run() {
+      $("import-file").click();
+    },
+  });
+  act("open-folder", {
+    label: "action.open_project_folder",
+    icon: "open",
+    tip: "tip.open_project_folder",
+    run() {
+      openProjectFolderFlow();
+    },
+  });
+  act("save", {
+    label: "action.save_project",
+    icon: "save",
+    key: "Ctrl+S",
     tip: host.isTauri ? "tip.save_project_tauri" : "tip.save_project_browser",
     run() {
-      if (host.isTauri) { desktopSave(false); return; }
+      if (host.isTauri) {
+        desktopSave(false);
+        return;
+      }
       saveNow();
       flashStatus(t("status.project_saved_browser"));
-    } });
-  act("save-folder", { label: "action.save_project_folder", icon: "save", tip: "tip.save_project_folder", run() {
-    saveProjectFolderFlow();
-  } });
+    },
+  });
+  act("save-folder", {
+    label: "action.save_project_folder",
+    icon: "save",
+    tip: "tip.save_project_folder",
+    run() {
+      saveProjectFolderFlow();
+    },
+  });
   act("export", { label: "Export Project As File…", run: exportProject });
   act("build", { label: "Export Standalone Game…", run: openStandaloneExport });
-  act("play", { label: "Playtest", icon: "play", tip: "Save and run the game", run() {
-    saveNow();
-    if (host.isTauri) {
-      host.openPlaytest().catch((e) => alert("Could not open play-test window: " + e.message));
-    } else {
-      window.open("play.html", "rpgatlas_play");
-    }
-  } });
-  act("mapprops", { label: "Map Properties…", run: openMapProps });
-  act("hdpreview", { label: "HD-2D Preview", icon: "hd2d", tip: "Toggle the live HD-2D preview panel (uses this map's HD-2D settings)", active: () => !!hdPanel, run: toggleHdPreview });
-
-  act("undo", { label: "Undo", icon: "undo", key: "Ctrl+Z", enabled: () => undoStack.length > 0, run: undo });
-  act("redo", { label: "Redo", icon: "redo", key: "Ctrl+Y", enabled: () => redoStack.length > 0, run: redo });
-  act("cut", { label: "Cut", icon: "cut", key: "Ctrl+X", tip: "Cut the selected area / event", enabled: canCopy, run: () => copySelection(true) });
-  act("copy", { label: "Copy", icon: "copy", key: "Ctrl+C", tip: "Copy the selected area / event (Shift+drag selects tiles)", enabled: canCopy, run: () => copySelection(false) });
-  act("paste", { label: "Paste", icon: "paste", key: "Ctrl+V", tip: "Paste — then click the map to place", enabled: () => !!(clipTiles || clipEvent), run: startPaste });
-  act("deselect", { label: "Clear Selection", key: "Esc", enabled: () => !!(selection || pasteMode), run: clearSelection });
-
-  act("mode-map", { label: "Map (Tile) Mode", icon: "map", tip: "Tile layer — draw the map", active: () => mode === "map", run: () => setMode("map") });
-  act("mode-event", { label: "Event Mode", icon: "event", tip: "Event layer — place and edit events", active: () => mode === "event", run: () => setMode("event") });
-  act("mode-pass", { label: "Passability Mode", icon: "pass", tip: "Passability — click tiles to cycle auto → ✕ block → ○ pass", active: () => mode === "pass", run: () => setMode("pass") });
-  act("mode-height", { label: "Height Mode (HD-2D)", icon: "height", key: "H",
-    tip: "Heights — paint HD-2D elevation with the Pen / Rectangle / Circle / Fill tools (keys 0–9 set the value)",
-    active: () => mode === "height", run: () => setMode("height") });
-  act("mode-collision", { label: "Collision Mode", icon: "collision", tip: "Collision — edit per-tile and free-form collision masks", active: () => mode === "collision", run: () => setMode("collision") });
-  act("mode-start", { label: "Set Start Position…", active: () => mode === "start", run() {
-    setMode("start");
-    flashStatus(t("status.set_start_pos"));
-  } });
-  act("mode-flags", { label: "Tile Flags Mode", icon: "flags", tip: "Tile Flags — paint passage, directional, and terrain property flags",
-    active: () => mode === "flags", run: () => setMode("flags") });
-
-  [["auto", "0"], ["ground", "1"], ["decor", "2"], ["decor2", "3"], ["over", "4"]].forEach(([ln, key]) => {
-    act("layer-" + ln, { label: LAYER_LABELS[ln], icon: "layer-" + ln, key,
-      active: () => layer === ln && mode === "map",
-      run() { if (mode !== "map") setMode("map"); setLayer(ln); } });
+  act("play", {
+    label: "Playtest",
+    icon: "play",
+    tip: "Save and run the game",
+    run() {
+      saveNow();
+      if (host.isTauri) {
+        host
+          .openPlaytest()
+          .catch((e) => alert("Could not open play-test window: " + e.message));
+      } else {
+        window.open("play.html", "rpgatlas_play");
+      }
+    },
   });
-  [["pen", "B"], ["erase", "E"], ["rect", "R"], ["circle", "O"], ["fill", "F"], ["shadow", "S"]].forEach(([t, key]) => {
-    act("tool-" + t, { label: TOOL_LABELS[t], icon: t, key,
-      tip: t === "shadow" ? "Shadow Pen — left paints a shadow quadrant, right erases" : TOOL_LABELS[t],
+  act("mapprops", { label: "Map Properties…", run: openMapProps });
+  act("hdpreview", {
+    label: "HD-2D Preview",
+    icon: "hd2d",
+    tip: "Toggle the live HD-2D preview panel (uses this map's HD-2D settings)",
+    active: () => !!hdPanel,
+    run: toggleHdPreview,
+  });
+
+  act("undo", {
+    label: "Undo",
+    icon: "undo",
+    key: "Ctrl+Z",
+    enabled: () => undoStack.length > 0,
+    run: undo,
+  });
+  act("redo", {
+    label: "Redo",
+    icon: "redo",
+    key: "Ctrl+Y",
+    enabled: () => redoStack.length > 0,
+    run: redo,
+  });
+  act("cut", {
+    label: "Cut",
+    icon: "cut",
+    key: "Ctrl+X",
+    tip: "Cut the selected area / event",
+    enabled: canCopy,
+    run: () => copySelection(true),
+  });
+  act("copy", {
+    label: "Copy",
+    icon: "copy",
+    key: "Ctrl+C",
+    tip: "Copy the selected area / event (Shift+drag selects tiles)",
+    enabled: canCopy,
+    run: () => copySelection(false),
+  });
+  act("paste", {
+    label: "Paste",
+    icon: "paste",
+    key: "Ctrl+V",
+    tip: "Paste — then click the map to place",
+    enabled: () => !!(clipTiles || clipEvent),
+    run: startPaste,
+  });
+  act("deselect", {
+    label: "Clear Selection",
+    key: "Esc",
+    enabled: () => !!(selection || pasteMode),
+    run: clearSelection,
+  });
+
+  act("mode-map", {
+    label: "Map (Tile) Mode",
+    icon: "map",
+    tip: "Tile layer — draw the map",
+    active: () => mode === "map",
+    run: () => setMode("map"),
+  });
+  act("mode-event", {
+    label: "Event Mode",
+    icon: "event",
+    tip: "Event layer — place and edit events",
+    active: () => mode === "event",
+    run: () => setMode("event"),
+  });
+  act("mode-pass", {
+    label: "Passability Mode",
+    icon: "pass",
+    tip: "Passability — click tiles to cycle auto → ✕ block → ○ pass",
+    active: () => mode === "pass",
+    run: () => setMode("pass"),
+  });
+  act("mode-height", {
+    label: "Height Mode (HD-2D)",
+    icon: "height",
+    key: "H",
+    tip: "Heights — paint HD-2D elevation with the Pen / Rectangle / Circle / Fill tools (keys 0–9 set the value)",
+    active: () => mode === "height",
+    run: () => setMode("height"),
+  });
+  act("mode-collision", {
+    label: "Collision Mode",
+    icon: "collision",
+    tip: "Collision — edit per-tile and free-form collision masks",
+    active: () => mode === "collision",
+    run: () => setMode("collision"),
+  });
+  act("mode-start", {
+    label: "Set Start Position…",
+    active: () => mode === "start",
+    run() {
+      setMode("start");
+      flashStatus(t("status.set_start_pos"));
+    },
+  });
+  act("mode-flags", {
+    label: "Tile Flags Mode",
+    icon: "flags",
+    tip: "Tile Flags — paint passage, directional, and terrain property flags",
+    active: () => mode === "flags",
+    run: () => setMode("flags"),
+  });
+
+  [
+    ["auto", "0"],
+    ["ground", "1"],
+    ["decor", "2"],
+    ["decor2", "3"],
+    ["over", "4"],
+  ].forEach(([ln, key]) => {
+    act("layer-" + ln, {
+      label: LAYER_LABELS[ln],
+      icon: "layer-" + ln,
+      key,
+      active: () => layer === ln && mode === "map",
+      run() {
+        if (mode !== "map") setMode("map");
+        setLayer(ln);
+      },
+    });
+  });
+  [
+    ["pen", "B"],
+    ["erase", "E"],
+    ["rect", "R"],
+    ["circle", "O"],
+    ["fill", "F"],
+    ["shadow", "S"],
+  ].forEach(([t, key]) => {
+    act("tool-" + t, {
+      label: TOOL_LABELS[t],
+      icon: t,
+      key,
+      tip:
+        t === "shadow"
+          ? "Shadow Pen — left paints a shadow quadrant, right erases"
+          : TOOL_LABELS[t],
       active: () => tool === t && (mode === "map" || mode === "height"),
-      run() { if (mode !== "map" && mode !== "height") setMode("map"); setTool(t); } });
+      run() {
+        if (mode !== "map" && mode !== "height") setMode("map");
+        setTool(t);
+      },
+    });
   });
 
   // ---- flags sub-tools ----
@@ -5282,44 +9810,114 @@ atlas.onMapLoad((map) => {
     ["terrain", "Flags: Terrain Tag", "flag-terrain"],
   ];
   const FLAG_ICONS = {
-    "flag-pass": svgIcon('<text x="8" y="15" font-size="12" font-weight="bold" text-anchor="middle" fill="currentColor" stroke="none">P</text>'),
+    "flag-pass": svgIcon(
+      '<text x="8" y="15" font-size="12" font-weight="bold" text-anchor="middle" fill="currentColor" stroke="none">P</text>',
+    ),
     "flag-dirn": svgIcon('<path d="M8 14l4-8 4 8"/>'),
     "flag-dirs": svgIcon('<path d="M8 6l4 8 4-8"/>'),
     "flag-dire": svgIcon('<path d="M6 8l8 4-8 4"/>'),
     "flag-dirw": svgIcon('<path d="M14 8l-8 4 8 4"/>'),
-    "flag-ladder": svgIcon('<rect x="7" y="3" width="6" height="14" rx="1"/><path d="M7 7h6M7 10h6M7 13h6"/>'),
-    "flag-bush": svgIcon('<path d="M10 10l-4 6h8z" fill="currentColor" stroke="none"/><path d="M6 10q4-6 8 0"/>'),
-    "flag-counter": svgIcon('<rect x="4" y="8" width="12" height="8"/><rect x="4" y="8" width="12" height="3"/>'),
+    "flag-ladder": svgIcon(
+      '<rect x="7" y="3" width="6" height="14" rx="1"/><path d="M7 7h6M7 10h6M7 13h6"/>',
+    ),
+    "flag-bush": svgIcon(
+      '<path d="M10 10l-4 6h8z" fill="currentColor" stroke="none"/><path d="M6 10q4-6 8 0"/>',
+    ),
+    "flag-counter": svgIcon(
+      '<rect x="4" y="8" width="12" height="8"/><rect x="4" y="8" width="12" height="3"/>',
+    ),
     "flag-damage": svgIcon('<path d="M10 4v12M4 10h12"/>'),
-    "flag-terrain": svgIcon('<text x="8" y="15" font-size="10" font-weight="bold" text-anchor="middle" fill="currentColor" stroke="none">T</text>'),
+    "flag-terrain": svgIcon(
+      '<text x="8" y="15" font-size="10" font-weight="bold" text-anchor="middle" fill="currentColor" stroke="none">T</text>',
+    ),
   };
   FLAG_TOOLS.forEach(([ft, label, iconKey]) => {
     ICONS[iconKey] = FLAG_ICONS[iconKey];
-    act("flags-" + ft, { label, icon: iconKey,
+    act("flags-" + ft, {
+      label,
+      icon: iconKey,
       active: () => mode === "flags" && flagsTool === ft,
       enabled: () => mode === "flags",
-      run() { if (mode !== "flags") setMode("flags"); flagsTool = ft; renderMap(); refreshToolbar(); setStatus(); } });
+      run() {
+        if (mode !== "flags") setMode("flags");
+        flagsTool = ft;
+        renderMap();
+        refreshToolbar();
+        setStatus();
+      },
+    });
   });
 
-  act("zoomin", { label: "Zoom In", icon: "zoomin", key: "+", run: () => zoomStep(1) });
-  act("zoomout", { label: "Zoom Out", icon: "zoomout", key: "−", run: () => zoomStep(-1) });
-  act("zoom1", { label: "Zoom 1:1", icon: "zoom1", key: "Ctrl+0", tip: "Set zoom to 100%", active: () => Math.abs(zoom - 1) < 0.01, run: () => setZoom(1) });
+  act("zoomin", {
+    label: "Zoom In",
+    icon: "zoomin",
+    key: "+",
+    run: () => zoomStep(1),
+  });
+  act("zoomout", {
+    label: "Zoom Out",
+    icon: "zoomout",
+    key: "−",
+    run: () => zoomStep(-1),
+  });
+  act("zoom1", {
+    label: "Zoom 1:1",
+    icon: "zoom1",
+    key: "Ctrl+0",
+    tip: "Set zoom to 100%",
+    active: () => Math.abs(zoom - 1) < 0.01,
+    run: () => setZoom(1),
+  });
   act("zoomfit", { label: "Fit Map In View", run: () => zoomFit() });
-  act("snap-toggle", { label: "Toggle Snap", icon: "snap", tip: "Snap mode: " + snapMode,
+  act("snap-toggle", {
+    label: "Toggle Snap",
+    icon: "snap",
+    tip: "Snap mode: " + snapMode,
     active: () => false,
     run() {
       const cycle = { free: "24", 24: "48", 48: "free" };
       snapMode = cycle[snapMode] || "free";
       flashStatus("Snap: " + (snapMode === "free" ? "Free" : snapMode + "px"));
       refreshToolbar();
-    } });
+    },
+  });
 
-  act("db", { label: "Database…", icon: "db", tip: "Database — actors, items, enemies, switches…", run: openDatabase });
-  act("plugins", { label: "Plugin Manager…", icon: "plugins", tip: "Plugin Manager — project JavaScript run at game boot", run: openPluginManager });
-  act("audio", { label: "Audio Manager…", icon: "audio", tip: "Audio Manager — preview sounds and music", run: openAudioManager });
-  act("search", { label: "Event Searcher…", icon: "search", tip: "Event Searcher — find text / switches / variables across maps", run: openEventSearcher });
-  act("resources", { label: "Resource Manager…", icon: "resources", tip: "Resource Manager — browse and export generated assets", run: openResourceManager });
-  act("chargen", { label: "Character Generator…", icon: "chargen", tip: "Character Generator — build original walking sprites", run: openCharGenerator });
+  act("db", {
+    label: "Database…",
+    icon: "db",
+    tip: "Database — actors, items, enemies, switches…",
+    run: openDatabase,
+  });
+  act("plugins", {
+    label: "Plugin Manager…",
+    icon: "plugins",
+    tip: "Plugin Manager — project JavaScript run at game boot",
+    run: openPluginManager,
+  });
+  act("audio", {
+    label: "Audio Manager…",
+    icon: "audio",
+    tip: "Audio Manager — preview sounds and music",
+    run: openAudioManager,
+  });
+  act("search", {
+    label: "Event Searcher…",
+    icon: "search",
+    tip: "Event Searcher — find text / switches / variables across maps",
+    run: openEventSearcher,
+  });
+  act("resources", {
+    label: "Resource Manager…",
+    icon: "resources",
+    tip: "Resource Manager — browse and export generated assets",
+    run: openResourceManager,
+  });
+  act("chargen", {
+    label: "Character Generator…",
+    icon: "chargen",
+    tip: "Character Generator — build original walking sprites",
+    run: openCharGenerator,
+  });
   act("language", { label: "Interface Language…", run: openLanguageSettings });
   act("patchnotes", { label: "Patch Notes", run: openPatchNotes });
   act("help", { label: "Quick Help", run: openHelp });
@@ -5329,11 +9927,36 @@ atlas.onMapLoad((map) => {
     ["new", "open", "save"],
     ["cut", "copy", "paste"],
     ["undo", "redo"],
-    ["mode-map", "mode-event", "mode-pass", "mode-height", "mode-collision", "mode-flags"],
+    [
+      "mode-map",
+      "mode-event",
+      "mode-pass",
+      "mode-height",
+      "mode-collision",
+      "mode-flags",
+    ],
     ["layer-auto", "layer-ground", "layer-decor", "layer-decor2", "layer-over"],
-    ["tool-pen", "tool-erase", "tool-rect", "tool-circle", "tool-fill", "tool-shadow"],
+    [
+      "tool-pen",
+      "tool-erase",
+      "tool-rect",
+      "tool-circle",
+      "tool-fill",
+      "tool-shadow",
+    ],
     ["zoomin", "zoomout", "zoom1", "snap-toggle"],
-    ["flags-passage", "flags-dir-n", "flags-dir-s", "flags-dir-e", "flags-dir-w", "flags-ladder", "flags-bush", "flags-counter", "flags-damage", "flags-terrain"],
+    [
+      "flags-passage",
+      "flags-dir-n",
+      "flags-dir-s",
+      "flags-dir-e",
+      "flags-dir-w",
+      "flags-ladder",
+      "flags-bush",
+      "flags-counter",
+      "flags-damage",
+      "flags-terrain",
+    ],
     ["db", "plugins", "audio", "search", "resources", "chargen"],
     ["hdpreview", "play"],
   ];
@@ -5350,7 +9973,8 @@ atlas.onMapLoad((map) => {
           onclick: () => runAct(id),
         });
         btn.innerHTML = ICONS[a.icon] || "";
-        if (id === "play") btn.appendChild(document.createTextNode(actionLabel(a)));
+        if (id === "play")
+          btn.appendChild(document.createTextNode(actionLabel(a)));
         a.btn = btn;
         bar.appendChild(btn);
       }
@@ -5366,14 +9990,70 @@ atlas.onMapLoad((map) => {
   }
 
   const MENUS = [
-    { label: "File", items: ["new", "open", "open-folder", "save", "save-folder", "-", "export", "build", "-", "play"] },
-    { label: "Edit", items: ["undo", "redo", "-", "cut", "copy", "paste", "-", "deselect"] },
-    { label: "Mode", items: ["mode-map", "mode-event", "mode-pass", "mode-height", "mode-collision", "mode-flags", "-", "mode-start"] },
-    { label: "Draw", items: ["tool-pen", "tool-erase", "tool-rect", "tool-circle", "tool-fill", "tool-shadow", "-", "snap-toggle"] },
-    { label: "Layer", items: ["layer-auto", "layer-ground", "layer-decor", "layer-decor2", "layer-over"] },
+    {
+      label: "File",
+      items: [
+        "new",
+        "open",
+        "open-folder",
+        "save",
+        "save-folder",
+        "-",
+        "export",
+        "build",
+        "-",
+        "play",
+      ],
+    },
+    {
+      label: "Edit",
+      items: ["undo", "redo", "-", "cut", "copy", "paste", "-", "deselect"],
+    },
+    {
+      label: "Mode",
+      items: [
+        "mode-map",
+        "mode-event",
+        "mode-pass",
+        "mode-height",
+        "mode-collision",
+        "mode-flags",
+        "-",
+        "mode-start",
+      ],
+    },
+    {
+      label: "Draw",
+      items: [
+        "tool-pen",
+        "tool-erase",
+        "tool-rect",
+        "tool-circle",
+        "tool-fill",
+        "tool-shadow",
+        "-",
+        "snap-toggle",
+      ],
+    },
+    {
+      label: "Layer",
+      items: [
+        "layer-auto",
+        "layer-ground",
+        "layer-decor",
+        "layer-decor2",
+        "layer-over",
+      ],
+    },
     { label: "Scale", items: ["zoomin", "zoomout", "zoom1", "zoomfit"] },
-    { label: "Tools", items: ["db", "plugins", "audio", "search", "resources", "chargen"] },
-    { label: "Game", items: ["play", "build", "-", "mapprops", "hdpreview", "mode-start"] },
+    {
+      label: "Tools",
+      items: ["db", "plugins", "audio", "search", "resources", "chargen"],
+    },
+    {
+      label: "Game",
+      items: ["play", "build", "-", "mapprops", "hdpreview", "mode-start"],
+    },
     { label: "Help", items: ["language", "-", "patchnotes", "help", "about"] },
   ];
   let menuOpenRef = null;
@@ -5388,20 +10068,33 @@ atlas.onMapLoad((map) => {
     closeMenus();
     const drop = h("div", { class: "menu-drop" });
     for (const it of menu.items) {
-      if (it === "-") { drop.appendChild(h("div", { class: "menu-sep" })); continue; }
+      if (it === "-") {
+        drop.appendChild(h("div", { class: "menu-sep" }));
+        continue;
+      }
       const a = ACT[it];
       const dis = !!(a.enabled && !a.enabled());
-      drop.appendChild(h("div", {
-        class: "menu-item" + (dis ? " disabled" : ""),
-        onclick() { if (dis) return; closeMenus(); a.run(); refreshToolbar(); },
-      },
-        h("span", { class: "mi-check" }, a.active && a.active() ? "✓" : ""),
-        h("span", { class: "mi-label" }, actionLabel(a)),
-        a.key ? h("span", { class: "mi-key" }, a.key) : null));
+      drop.appendChild(
+        h(
+          "div",
+          {
+            class: "menu-item" + (dis ? " disabled" : ""),
+            onclick() {
+              if (dis) return;
+              closeMenus();
+              a.run();
+              refreshToolbar();
+            },
+          },
+          h("span", { class: "mi-check" }, a.active && a.active() ? "✓" : ""),
+          h("span", { class: "mi-label" }, actionLabel(a)),
+          a.key ? h("span", { class: "mi-key" }, a.key) : null,
+        ),
+      );
     }
     const r = lab.getBoundingClientRect();
     drop.style.left = r.left + "px";
-    drop.style.top = (r.bottom + 2) + "px";
+    drop.style.top = r.bottom + 2 + "px";
     document.body.appendChild(drop);
     lab.classList.add("open");
     menuOpenRef = { drop, lab };
@@ -5412,7 +10105,8 @@ atlas.onMapLoad((map) => {
     for (const menu of MENUS) {
       const lab = h("span", { class: "menu-label" }, t(menu.label));
       lab.addEventListener("mousedown", (e) => {
-        e.preventDefault(); e.stopPropagation();
+        e.preventDefault();
+        e.stopPropagation();
         if (menuOpenRef && menuOpenRef.lab === lab) closeMenus();
         else openMenuFor(menu, lab);
       });
@@ -5438,38 +10132,59 @@ atlas.onMapLoad((map) => {
     dragPlacement = false;
     dragPlacementObj = null;
     pasteMode = null;
-    renderMap(); refreshToolbar(); setStatus();
+    renderMap();
+    refreshToolbar();
+    setStatus();
   }
   function setTool(t) {
     tool = t;
-    renderMap(); refreshToolbar(); setStatus();
+    renderMap();
+    refreshToolbar();
+    setStatus();
   }
   function setLayer(l) {
     layer = l;
-    renderMap(); refreshToolbar(); setStatus();
+    renderMap();
+    refreshToolbar();
+    setStatus();
   }
   function setZoom(z, pivot) {
     z = Math.max(0.15, Math.min(3, z));
     const sc = $("mapscroll");
     const px = pivot ? pivot.x : sc.clientWidth / 2;
     const py = pivot ? pivot.y : sc.clientHeight / 2;
-    const wx = (sc.scrollLeft + px - 14) / zoom;  // 14 = #mapscroll padding
+    const wx = (sc.scrollLeft + px - 14) / zoom; // 14 = #mapscroll padding
     const wy = (sc.scrollTop + py - 14) / zoom;
     zoom = z;
     renderMap();
     sc.scrollLeft = wx * zoom + 14 - px;
     sc.scrollTop = wy * zoom + 14 - py;
-    setStatus(); refreshToolbar();
+    setStatus();
+    refreshToolbar();
   }
   function zoomStep(d, pivot) {
-    let best = 0, bd = Infinity;
-    ZOOMS.forEach((z, i) => { const dd = Math.abs(z - zoom); if (dd < bd) { bd = dd; best = i; } });
+    let best = 0,
+      bd = Infinity;
+    ZOOMS.forEach((z, i) => {
+      const dd = Math.abs(z - zoom);
+      if (dd < bd) {
+        bd = dd;
+        best = i;
+      }
+    });
     setZoom(ZOOMS[Math.max(0, Math.min(ZOOMS.length - 1, best + d))], pivot);
   }
   function zoomFit() {
-    const m = curMap(), sc = $("mapscroll");
+    const m = curMap(),
+      sc = $("mapscroll");
     if (!m) return;
-    setZoom(Math.min((sc.clientWidth - 30) / (m.width * TILE), (sc.clientHeight - 30) / (m.height * TILE), 1.5));
+    setZoom(
+      Math.min(
+        (sc.clientWidth - 30) / (m.width * TILE),
+        (sc.clientHeight - 30) / (m.height * TILE),
+        1.5,
+      ),
+    );
   }
 
   // ============================ boot / wiring ============================
@@ -5487,7 +10202,9 @@ atlas.onMapLoad((map) => {
     try {
       const storedFolder = localStorage.getItem("rpgatlas_project_folder");
       if (storedFolder) currentProjectFolderPath = storedFolder;
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      /* ignore */
+    }
 
     proj = loadStored() || DataDefaults.newProject();
     Assets.registerCustomChars(proj.customChars);
@@ -5503,7 +10220,8 @@ atlas.onMapLoad((map) => {
     // palette
     palCanvas.addEventListener("mousedown", (e) => {
       const r = palCanvas.getBoundingClientRect();
-      const px = Math.floor((e.clientX - r.left) / TILE), py = Math.floor((e.clientY - r.top) / TILE);
+      const px = Math.floor((e.clientX - r.left) / TILE),
+        py = Math.floor((e.clientY - r.top) / TILE);
       const cols = palCanvas.width / TILE;
       const idx = py * cols + px;
       const allTiles = Assets.tiles;
@@ -5521,7 +10239,8 @@ atlas.onMapLoad((map) => {
           paletteMarqueeTiles = [];
           paletteMarqueeStart = null;
           paletteMarqueeEnd = null;
-          renderPalette(); setStatus();
+          renderPalette();
+          setStatus();
         }
         return;
       }
@@ -5535,13 +10254,13 @@ atlas.onMapLoad((map) => {
       // ---- standard single-click selection ----
       let visibleTiles = [];
       if (paletteTab === "all") {
-        visibleTiles = allTiles.map((t, i) => i).filter(i => t && t.key);
+        visibleTiles = allTiles.map((t, i) => i).filter((i) => t && t.key);
       } else if (paletteTab === "today") {
         const m = curMap();
         const usedIds = new Set();
         if (m && m.tilePlacements) {
           for (const ln of LAYER_ORDER) {
-            for (const p of (m.tilePlacements[ln] || [])) usedIds.add(p.tileId);
+            for (const p of m.tilePlacements[ln] || []) usedIds.add(p.tileId);
           }
         }
         if (m && m.layers) {
@@ -5551,17 +10270,23 @@ atlas.onMapLoad((map) => {
             }
           }
         }
-        visibleTiles = allTiles.map((t, i) => i).filter(i => t && usedIds.has(i));
+        visibleTiles = allTiles
+          .map((t, i) => i)
+          .filter((i) => t && usedIds.has(i));
       } else {
         if (ts && ts.tileIds) {
-          visibleTiles = ts.tileIds.filter(id => id != null && allTiles[id]);
+          visibleTiles = ts.tileIds.filter((id) => id != null && allTiles[id]);
         } else {
-          visibleTiles = allTiles.map((t, i) => i).filter(i => t && t.key);
+          visibleTiles = allTiles.map((t, i) => i).filter((i) => t && t.key);
         }
       }
       if (visibleTiles.length === 0) visibleTiles = [0];
       const id = visibleTiles[idx];
-      if (id != null && Assets.tiles[id]) { selectedTile = id; renderPalette(); setStatus(); }
+      if (id != null && Assets.tiles[id]) {
+        selectedTile = id;
+        renderPalette();
+        setStatus();
+      }
     });
     // Mouse up on palette (for B-E marquee completion)
     palCanvas.addEventListener("mouseup", () => {
@@ -5578,27 +10303,35 @@ atlas.onMapLoad((map) => {
             for (let rx = c1; rx <= c2; rx++) {
               const i = ry * sc + rx;
               const tid = ts2.tileIds[i];
-              if (tid != null && Assets.tiles[tid]) paletteMarqueeTiles.push(tid);
+              if (tid != null && Assets.tiles[tid])
+                paletteMarqueeTiles.push(tid);
             }
           }
           if (paletteMarqueeTiles.length) {
             selectedTile = paletteMarqueeTiles[0];
           }
         }
-        renderPalette(); setStatus();
+        renderPalette();
+        setStatus();
       }
       paletteMarqueeStart = null;
       paletteMarqueeEnd = null;
     });
     palCanvas.addEventListener("mousemove", (e) => {
       const r = palCanvas.getBoundingClientRect();
-      const px = Math.floor((e.clientX - r.left) / TILE), py = Math.floor((e.clientY - r.top) / TILE);
+      const px = Math.floor((e.clientX - r.left) / TILE),
+        py = Math.floor((e.clientY - r.top) / TILE);
       const cols = palCanvas.width / TILE;
       const idx = py * cols + px;
       const allTiles = Assets.tiles;
       const ts = Assets.tilesets[paletteTab];
       // Handle B-E marquee drag
-      if (paletteMarqueeStart && ts && ts.cols > 1 && !/^A[1-5]$/i.test(ts.category || "")) {
+      if (
+        paletteMarqueeStart &&
+        ts &&
+        ts.cols > 1 &&
+        !/^A[1-5]$/i.test(ts.category || "")
+      ) {
         paletteMarqueeEnd = { row: py, col: px };
         renderPalette();
         return;
@@ -5606,13 +10339,13 @@ atlas.onMapLoad((map) => {
       // find tile name from filtered palette for tooltip
       let visibleTiles = [];
       if (paletteTab === "all") {
-        visibleTiles = allTiles.map((t, i) => i).filter(i => t && t.key);
+        visibleTiles = allTiles.map((t, i) => i).filter((i) => t && t.key);
       } else if (paletteTab === "today") {
         const m = curMap();
         const usedIds = new Set();
         if (m && m.tilePlacements) {
           for (const ln of LAYER_ORDER) {
-            for (const p of (m.tilePlacements[ln] || [])) usedIds.add(p.tileId);
+            for (const p of m.tilePlacements[ln] || []) usedIds.add(p.tileId);
           }
         }
         if (m && m.layers) {
@@ -5622,17 +10355,20 @@ atlas.onMapLoad((map) => {
             }
           }
         }
-        visibleTiles = allTiles.map((t, i) => i).filter(i => t && usedIds.has(i));
+        visibleTiles = allTiles
+          .map((t, i) => i)
+          .filter((i) => t && usedIds.has(i));
       } else {
         if (ts && ts.tileIds) {
-          visibleTiles = ts.tileIds.filter(id => id != null && allTiles[id]);
+          visibleTiles = ts.tileIds.filter((id) => id != null && allTiles[id]);
         } else {
-          visibleTiles = allTiles.map((t, i) => i).filter(i => t && t.key);
+          visibleTiles = allTiles.map((t, i) => i).filter((i) => t && t.key);
         }
       }
       if (visibleTiles.length === 0) visibleTiles = [0];
       const id = visibleTiles[idx];
-      if (id != null && Assets.tiles[id]) palCanvas.title = Assets.tiles[id].name;
+      if (id != null && Assets.tiles[id])
+        palCanvas.title = Assets.tiles[id].name;
       else palCanvas.title = "";
     });
 
@@ -5642,15 +10378,26 @@ atlas.onMapLoad((map) => {
     window.addEventListener("mouseup", onCanvasUp);
     mapCanvas.addEventListener("dblclick", onCanvasDbl);
     mapCanvas.addEventListener("contextmenu", (e) => e.preventDefault());
-    mapCanvas.addEventListener("mouseleave", () => { hoverCell = null; hoverQuad = 0; renderMap(); });
+    mapCanvas.addEventListener("mouseleave", () => {
+      hoverCell = null;
+      hoverQuad = 0;
+      renderMap();
+    });
 
     // ctrl+wheel zooms around the cursor
-    $("mapscroll").addEventListener("wheel", (e) => {
-      if (!e.ctrlKey) return;
-      e.preventDefault();
-      const r = $("mapscroll").getBoundingClientRect();
-      zoomStep(e.deltaY < 0 ? 1 : -1, { x: e.clientX - r.left, y: e.clientY - r.top });
-    }, { passive: false });
+    $("mapscroll").addEventListener(
+      "wheel",
+      (e) => {
+        if (!e.ctrlKey) return;
+        e.preventDefault();
+        const r = $("mapscroll").getBoundingClientRect();
+        zoomStep(e.deltaY < 0 ? 1 : -1, {
+          x: e.clientX - r.left,
+          y: e.clientY - r.top,
+        });
+      },
+      { passive: false },
+    );
 
     $("import-file").addEventListener("change", (e) => {
       if (e.target.files[0]) importProject(e.target.files[0]);
@@ -5661,51 +10408,136 @@ atlas.onMapLoad((map) => {
     $("map-gen").addEventListener("click", openMapGenProps);
 
     document.addEventListener("keydown", (e) => {
-      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") return;
+      if (
+        e.target.tagName === "INPUT" ||
+        e.target.tagName === "TEXTAREA" ||
+        e.target.tagName === "SELECT"
+      )
+        return;
       if (modalRoot().children.length) return;
       if (e.code === "Escape") {
-        if (menuOpenRef) { closeMenus(); return; }
-        if (pasteMode || selection) { clearSelection(); return; }
-        if (selectedEvent) { selectedEvent = null; renderMap(); refreshToolbar(); return; }
-        if (selectedMask) { selectedMask = null; maskDragging = false; renderMap(); refreshToolbar(); return; }
-        if (selectedPlacement) { selectedPlacement = null; updatePropsPanel(null); renderMap(); refreshToolbar(); return; }
+        if (menuOpenRef) {
+          closeMenus();
+          return;
+        }
+        if (pasteMode || selection) {
+          clearSelection();
+          return;
+        }
+        if (selectedEvent) {
+          selectedEvent = null;
+          renderMap();
+          refreshToolbar();
+          return;
+        }
+        if (selectedMask) {
+          selectedMask = null;
+          maskDragging = false;
+          renderMap();
+          refreshToolbar();
+          return;
+        }
+        if (selectedPlacement) {
+          selectedPlacement = null;
+          updatePropsPanel(null);
+          renderMap();
+          refreshToolbar();
+          return;
+        }
         return;
       }
       if (e.ctrlKey || e.metaKey) {
         switch (e.code) {
-          case "KeyZ": e.preventDefault(); undo(); break;
-          case "KeyY": e.preventDefault(); redo(); break;
-          case "KeyX": e.preventDefault(); copySelection(true); break;
-          case "KeyC": e.preventDefault(); copySelection(false); break;
-          case "KeyV": e.preventDefault(); startPaste(); break;
-          case "KeyS": e.preventDefault(); runAct("save"); break;
-          case "Digit0": e.preventDefault(); setZoom(1); break;
+          case "KeyZ":
+            e.preventDefault();
+            undo();
+            break;
+          case "KeyY":
+            e.preventDefault();
+            redo();
+            break;
+          case "KeyX":
+            e.preventDefault();
+            copySelection(true);
+            break;
+          case "KeyC":
+            e.preventDefault();
+            copySelection(false);
+            break;
+          case "KeyV":
+            e.preventDefault();
+            startPaste();
+            break;
+          case "KeyS":
+            e.preventDefault();
+            runAct("save");
+            break;
+          case "Digit0":
+            e.preventDefault();
+            setZoom(1);
+            break;
         }
         return;
       }
-      if (mode === "height" && /^Digit\d$/.test(e.code)) { // 0–9 set the painted elevation
+      if (mode === "height" && /^Digit\d$/.test(e.code)) {
+        // 0–9 set the painted elevation
         heightVal = Number(e.code.slice(5));
         setStatus();
         return;
       }
       switch (e.code) {
-        case "KeyB": runAct("tool-pen"); break;
-        case "KeyE": runAct("tool-erase"); break;
-        case "KeyR": runAct("tool-rect"); break;
-        case "KeyO": runAct("tool-circle"); break;
-        case "KeyF": runAct("tool-fill"); break;
-        case "KeyS": runAct("tool-shadow"); break;
-        case "KeyC": runAct("mode-collision"); break;
-        case "KeyG": runAct("mode-flags"); break;
-        case "KeyH": runAct("mode-height"); break;
-        case "Digit0": runAct("layer-auto"); break;
-        case "Digit1": runAct("layer-ground"); break;
-        case "Digit2": runAct("layer-decor"); break;
-        case "Digit3": runAct("layer-decor2"); break;
-        case "Digit4": runAct("layer-over"); break;
-        case "Equal": case "NumpadAdd": zoomStep(1); break;
-        case "Minus": case "NumpadSubtract": zoomStep(-1); break;
-        case "Delete": case "Backspace":
+        case "KeyB":
+          runAct("tool-pen");
+          break;
+        case "KeyE":
+          runAct("tool-erase");
+          break;
+        case "KeyR":
+          runAct("tool-rect");
+          break;
+        case "KeyO":
+          runAct("tool-circle");
+          break;
+        case "KeyF":
+          runAct("tool-fill");
+          break;
+        case "KeyS":
+          runAct("tool-shadow");
+          break;
+        case "KeyC":
+          runAct("mode-collision");
+          break;
+        case "KeyG":
+          runAct("mode-flags");
+          break;
+        case "KeyH":
+          runAct("mode-height");
+          break;
+        case "Digit0":
+          runAct("layer-auto");
+          break;
+        case "Digit1":
+          runAct("layer-ground");
+          break;
+        case "Digit2":
+          runAct("layer-decor");
+          break;
+        case "Digit3":
+          runAct("layer-decor2");
+          break;
+        case "Digit4":
+          runAct("layer-over");
+          break;
+        case "Equal":
+        case "NumpadAdd":
+          zoomStep(1);
+          break;
+        case "Minus":
+        case "NumpadSubtract":
+          zoomStep(-1);
+          break;
+        case "Delete":
+        case "Backspace":
           if (mode === "collision" && selectedMask) {
             pushUndo();
             const m = curMap();
@@ -5713,22 +10545,30 @@ atlas.onMapLoad((map) => {
               m.collision.masks.splice(selectedMask.index, 1);
             }
             selectedMask = null;
-            touch(); renderMap(); refreshToolbar();
+            touch();
+            renderMap();
+            refreshToolbar();
           } else if (mode === "map" && selectedPlacement) {
             pushUndo();
             const m = curMap();
             const pl = m.tilePlacements[selectedPlacement.layer] || [];
-            const idx = pl.findIndex(p => p.id === selectedPlacement.placement.id);
+            const idx = pl.findIndex(
+              (p) => p.id === selectedPlacement.placement.id,
+            );
             if (idx >= 0) pl.splice(idx, 1);
             selectedPlacement = null;
             updatePropsPanel(null);
-            touch(); renderMap(); refreshToolbar();
+            touch();
+            renderMap();
+            refreshToolbar();
           } else if (mode === "event" && selectedEvent) {
             pushUndo();
             const m = curMap();
             m.events = m.events.filter((x) => x !== selectedEvent);
             selectedEvent = null;
-            touch(); renderMap(); refreshToolbar();
+            touch();
+            renderMap();
+            refreshToolbar();
           }
           break;
       }

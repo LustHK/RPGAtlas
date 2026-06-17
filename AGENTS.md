@@ -17,6 +17,7 @@ and generated UI copy must use the editor i18n system instead of hardcoded strin
 - If a new UI string is needed, add the key and translations before wiring the UI.
 
 ## Patch Notes Requirement
+
 ...
 Every AI-assisted feature addition or substantial project change must include a short, descriptive
 entry in `js/patch-notes.js`.
@@ -40,14 +41,14 @@ pixel-position system. Key documents:
 
 ### Tileset Sheet Dimensions (RPG Maker MZ)
 
-| Sheet | Resolution | Grid | Kinds | Autotile |
-|-------|-----------|------|-------|----------|
-| TileA1.png | 768×576 | 16×12 | 5 blocks | Animated |
-| TileA2.png | 768×576 | 16×12 | 32 (8×4) | Quarter-system, 48 shapes |
-| TileA3.png | 768×384 | 16×8 | 8 groups | Group pattern |
-| TileA4.png | 768×720 | 16×15 | 48 (3 bands) | Top (48) + Side (16) |
-| TileA5.png | 384×768 | 8×16 | 128 none | — |
-| TileB–E.png | 768×768 | 16×16 | 256 each | — |
+| Sheet       | Resolution | Grid  | Kinds        | Autotile                  |
+| ----------- | ---------- | ----- | ------------ | ------------------------- |
+| TileA1.png  | 768×576    | 16×12 | 5 blocks     | Animated                  |
+| TileA2.png  | 768×576    | 16×12 | 32 (8×4)     | Quarter-system, 48 shapes |
+| TileA3.png  | 768×384    | 16×8  | 8 groups     | Group pattern             |
+| TileA4.png  | 768×720    | 16×15 | 48 (3 bands) | Top (48) + Side (16)      |
+| TileA5.png  | 384×768    | 8×16  | 128 none     | —                         |
+| TileB–E.png | 768×768    | 16×16 | 256 each     | —                         |
 
 ### Autotile System
 
