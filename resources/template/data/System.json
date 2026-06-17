@@ -1,0 +1,95 @@
+{
+  "meta": {
+    "engine": "rpgatlas",
+    "version": 3,
+    "builtinsSeeded": true
+  },
+  "system": {
+    "title": "Untitled RPG",
+    "startMapId": 1,
+    "startX": 10,
+    "startY": 10,
+    "startDir": 3,
+    "party": [1],
+    "startGold": 100,
+    "currency": "G",
+    "switches": [""],
+    "variables": [""],
+    "startTransparent": false,
+    "battleView": "side",
+    "screenWidth": 816,
+    "screenHeight": 624,
+    "uiWidth": 0,
+    "uiHeight": 0,
+    "screenScale": 1.6,
+    "fontText": "\"Segoe UI\", system-ui, sans-serif",
+    "fontMenu": "\"Segoe UI\", system-ui, sans-serif",
+    "fontSize": 15,
+    "windowOpacity": 93,
+    "pixelMovement": true,
+    "sounds": {
+      "cursor": "cursor",
+      "ok": "ok",
+      "cancel": "cancel",
+      "buzzer": "buzzer",
+      "equip": "item",
+      "heal": "heal",
+      "save": "save",
+      "encounter": "encounter",
+      "escape": "escape",
+      "levelup": "levelup",
+      "gameover": "gameover"
+    },
+    "music": {
+      "title": "title",
+      "battle": "battle"
+    },
+    "types": {
+      "elements": [
+        {"key": "physical", "name": "Physical"},
+        {"key": "fire", "name": "Fire"},
+        {"key": "ice", "name": "Ice"},
+        {"key": "thunder", "name": "Thunder"},
+        {"key": "poison", "name": "Poison"},
+        {"key": "magic", "name": "Other magic"}
+      ],
+      "skillTypes": [
+        {"key": "phys", "name": "Physical"},
+        {"key": "magic", "name": "Magical"},
+        {"key": "heal", "name": "Heal"}
+      ],
+      "weaponTypes": [
+        {"id": 1, "name": "Dagger"},
+        {"id": 2, "name": "Sword"},
+        {"id": 3, "name": "Axe"},
+        {"id": 4, "name": "Spear"},
+        {"id": 5, "name": "Bow"},
+        {"id": 6, "name": "Staff"},
+        {"id": 7, "name": "Wand"},
+        {"id": 8, "name": "Claw"}
+      ],
+      "armorTypes": [
+        {"id": 1, "name": "General Armor"},
+        {"id": 2, "name": "Magic Armor"},
+        {"id": 3, "name": "Light Armor"},
+        {"id": 4, "name": "Heavy Armor"},
+        {"id": 5, "name": "Shield"}
+      ],
+      "equipTypes": [
+        {"id": 1, "name": "Weapon"},
+        {"id": 2, "name": "Shield"},
+        {"id": 3, "name": "Head"},
+        {"id": 4, "name": "Body"},
+        {"id": 5, "name": "Accessory"}
+      ]
+    }
+  },
+  "plugins": [],
+  "quests": [],
+  "customChars": [],
+  "commandPresets": [],
+  "assets": {
+    "tiles": {}
+  },
+  "tilesets": {}
+}

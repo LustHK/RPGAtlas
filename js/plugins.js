@@ -21,7 +21,8 @@
 */
 "use strict";
 
-const AtlasBuiltins = (() => {
+(() => {
+  const t = (k, v) => window.RPGAtlasI18n ? window.RPGAtlasI18n.t(k, v) : k;
 
   // ---- Atlas_Core: shared library every other Atlas_* plugin builds on ----
   function Atlas_Core(atlas, game) {
@@ -251,35 +252,33 @@ const AtlasBuiltins = (() => {
     Atlas.register("Atlas_Weather", { set: Atlas.weather, config: CONFIG });
   }
 
-  // ---- registry ----
-  const LIST = [
-    { key: "Atlas_Core", fn: Atlas_Core, on: true,
-      desc: "Shared library every other Atlas plugin builds on. Load first." },
-    { key: "Atlas_TextCodes", fn: Atlas_TextCodes, on: true,
-      desc: "Inline icons (\\i[n]), colour codes (\\c[n]) and BBCode in messages." },
-    { key: "Atlas_Transitions", fn: Atlas_Transitions, on: true,
-      desc: "Transfer effects: fade, iris, curtain, slide." },
-    { key: "Atlas_Weather", fn: Atlas_Weather, on: true,
-      desc: "Rain, storm, snow and fog overlays; per-map or scripted." },
-  ];
+  const AtlasBuiltins = (() => {
+    const LIST = [
+      { key: "Atlas_Core", fn: Atlas_Core, on: true, desc: t("plugin.core_desc") },
+      { key: "Atlas_TextCodes", fn: Atlas_TextCodes, on: true, desc: t("plugin.textcodes_desc") },
+      { key: "Atlas_Transitions", fn: Atlas_Transitions, on: true, desc: t("plugin.transitions_desc") },
+      { key: "Atlas_Weather", fn: Atlas_Weather, on: true, desc: t("plugin.weather_desc") },
+    ];
 
-  function bodyOf(fn) {
-    const s = fn.toString();
-    return s.slice(s.indexOf("{") + 1, s.lastIndexOf("}")).replace(/^\n/, "").replace(/\s+$/, "") + "\n";
-  }
-  function specByKey(key) { return LIST.find((s) => s.key === key); }
-  function make(key, id) {
-    const s = specByKey(key);
-    if (!s) return null;
-    return { id: id, key: s.key, name: s.key, on: s.on !== false, builtin: true, code: bodyOf(s.fn) };
-  }
-  function seed(startId) {
-    return LIST.map((s, i) => make(s.key, (startId || 1) + i));
-  }
-  function missingFor(plugins) {
-    return LIST.filter((s) => !(plugins || []).some((p) => p.key === s.key));
-  }
+    function bodyOf(fn) {
+      const s = fn.toString();
+      return s.slice(s.indexOf("{") + 1, s.lastIndexOf("}")).replace(/^\n/, "").replace(/\s+$/, "") + "\n";
+    }
+    function specByKey(key) { return LIST.find((s) => s.key === key); }
+    function make(key, id) {
+      const s = specByKey(key);
+      if (!s) return null;
+      return { id: id, key: s.key, name: s.key, on: s.on !== false, builtin: true, code: bodyOf(s.fn) };
+    }
+    function seed(startId) {
+      return LIST.map((s, i) => make(s.key, (startId || 1) + i));
+    }
+    function missingFor(plugins) {
+      return LIST.filter((s) => !(plugins || []).some((p) => p.key === s.key));
+    }
 
-  return { list: LIST, make, seed, missingFor, bodyOf, specByKey };
+    return { list: LIST, make, seed, missingFor, bodyOf, specByKey };
+  })();
+
+  if (typeof window !== "undefined") window.AtlasBuiltins = AtlasBuiltins;
 })();
-if (typeof window !== "undefined") window.AtlasBuiltins = AtlasBuiltins;

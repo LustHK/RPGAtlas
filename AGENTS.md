@@ -1,7 +1,23 @@
 # RPGAtlas AI Contribution Memory
 
-## Patch Notes Requirement
+## i18n Requirement
 
+All user-facing editor text, modal titles, button labels, tooltips, aria labels, hints,
+and generated UI copy must use the editor i18n system instead of hardcoded strings.
+
+- English is the mandatory source language for all strings. Use it as the fallback.
+- Add the English source text to `locales/en.json` first.
+- Add matching keys to every locale JSON (`pt.json`, `es.json`, `fr.json`, `de.json`) so all
+  language files stay synchronized.
+- Use `t("key")` for dynamic DOM text and `t("key", { name })` for interpolation.
+- Prefer existing key namespaces: `dialog.*`, `btn.*`, `action.*`, `tip.*`, `label.*`,
+  `status.*`, `sidebar.*`, `map.*`, `tool.*`, `layer.*`, `menu.*`, `mode.*`.
+- For static HTML, use `data-i18n="key"` and `data-i18n-title="key"` instead of English text.
+- Do not add new user-facing strings directly in `editor.js`, HTML, or other modules.
+- If a new UI string is needed, add the key and translations before wiring the UI.
+
+## Patch Notes Requirement
+...
 Every AI-assisted feature addition or substantial project change must include a short, descriptive
 entry in `js/patch-notes.js`.
 

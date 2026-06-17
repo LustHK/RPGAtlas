@@ -71,15 +71,15 @@
     }
     function effectLabel(entry) {
       if (!entry || !entry.kind) return "";
-      if (entry.kind === "switch") return "Switch " + entry.id + " " + (rewardBool(entry.val) ? "ON" : "OFF");
-      if (entry.kind === "var") return "Variable " + entry.id + " " + (entry.op || "set") + " " + rewardAmount(entry);
+      if (entry.kind === "switch") return t("quest.effect.switch", { id: entry.id, value: rewardBool(entry.val) ? t("quest.objective.switch_on") : t("quest.objective.switch_off") });
+      if (entry.kind === "var") return t("quest.effect.variable", { id: entry.id, op: entry.op || "set", amount: rewardAmount(entry) });
       if (entry.kind === "questUnlock") {
         const q = questDef(entry.questId);
-        return "Unlock quest " + (q ? q.name : ("#" + entry.questId));
+        return t("quest.effect.unlock", { name: q ? q.name : ("#" + entry.questId) });
       }
       if (entry.kind === "questLock") {
         const q = questDef(entry.questId);
-        return "Lock quest " + (q ? q.name : ("#" + entry.questId));
+        return t("quest.effect.lock", { name: q ? q.name : ("#" + entry.questId) });
       }
       return rewardLabel(entry);
     }
@@ -119,13 +119,13 @@
       if (obj.label) return obj.label;
       if (obj.kind === "kill") {
         const enemy = RA.byId(proj().enemies, Number(obj.enemyId) || 0);
-        return "Defeat " + (enemy ? enemy.name : "enemy") + (objectiveCount(obj) > 1 ? " ×" + objectiveCount(obj) : "");
+        return t("quest.objective.defeat") + " " + (enemy ? enemy.name : t("quest.objective.enemy")) + (objectiveCount(obj) > 1 ? " ×" + objectiveCount(obj) : "");
       }
       if (obj.kind === "fetch") {
         const item = RA.byId(dbFor(objectiveItemKind(obj)), Number(obj.id) || 0);
-        return "Bring " + (item ? item.name : "item") + (objectiveCount(obj) > 1 ? " ×" + objectiveCount(obj) : "");
+        return t("quest.objective.bring") + " " + (item ? item.name : t("quest.objective.item")) + (objectiveCount(obj) > 1 ? " ×" + objectiveCount(obj) : "");
       }
-      return "Complete objective";
+      return t("quest.objective.complete");
     }
     function objectiveDisplay(def, st, index) {
       const obj = questObjectives(def)[index];

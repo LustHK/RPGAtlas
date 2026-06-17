@@ -21,10 +21,10 @@
 
     function groups() {
       return [
-        { key: "active", title: "Active Quests" },
-        { key: "completed", title: "Completed Quests" },
-        { key: "failed", title: "Failed Quests" },
-        { key: "abandoned", title: "Abandoned Quests" },
+        { key: "active", title: t("journal.active") },
+        { key: "completed", title: t("journal.completed") },
+        { key: "failed", title: t("journal.failed") },
+        { key: "abandoned", title: t("journal.abandoned") },
       ];
     }
 
@@ -78,7 +78,7 @@
           win.style.minHeight = "560px";
           win.style.maxWidth = "760px";
           win.style.maxHeight = "560px";
-          win.appendChild(el("div", "win-title", "Journal"));
+          win.appendChild(el("div", "win-title", t("journal.title")));
 
           const filterRow = el("div", "journal-filters");
           const body = el("div", "journal-body");
@@ -204,7 +204,7 @@
             questList.innerHTML = "";
 
             if (!quests.length) {
-              emptyState.textContent = "No " + currentGroup().title.toLowerCase() + ".";
+              emptyState.textContent = t("journal.empty_group", { group: currentGroup().title.toLowerCase() });
               emptyState.style.display = "";
               return;
             }
@@ -245,7 +245,7 @@
           function refreshDetail() {
             const q = currentQuest();
             if (!q) {
-              detail.innerHTML = '<div class="journal-empty-detail dim">No quest selected.</div>';
+              detail.innerHTML = '<div class="journal-empty-detail dim">' + t("journal.empty_detail") + '</div>';
               abandonBtn.style.display = "none";
               return;
             }
@@ -284,7 +284,7 @@
             const q = currentQuest();
             if (!q) return;
             if (Quests.abandon(q.id)) {
-              await showMessage("", "Quest abandoned.");
+              await showMessage("", t("journal.abandoned_msg"));
               finish("close");
             }
           });

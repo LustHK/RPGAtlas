@@ -9,26 +9,28 @@ const Assets = (() => {
   const external = { characters: [], facesets: [], enemies: [], tilesets: [] };
   const externalByKey = new Map();
   const faceByName = new Map();
+  const t = (k, v) => window.RPGAtlasI18n ? window.RPGAtlasI18n.t(k, v) : k;
+
   // MZ tileset specs: keyed by category suffix (A1–A5, B–E)
   const MZ_TILESET_SPECS = {
     A1: { cols: 16, rows: 12, w: 768, h: 576, passDefault: false, terrain: false,
-          kindCols: 5, kindRows: 1, kindW: 3, kindH: 4, autotile: "animated", desc: "Animated autotiles" },
+          kindCols: 5, kindRows: 1, kindW: 3, kindH: 4, autotile: "animated", desc: t("asset.animated_autotiles") },
     A2: { cols: 16, rows: 12, w: 768, h: 576, passDefault: true,  terrain: true,
-          kindCols: 8, kindRows: 4, kindW: 2, kindH: 3, autotile: "floor",    desc: "Ground autotiles" },
+          kindCols: 8, kindRows: 4, kindW: 2, kindH: 3, autotile: "floor",    desc: t("asset.ground_autotiles") },
     A3: { cols: 16, rows: 8,  w: 768, h: 384, passDefault: false, terrain: false,
-          kindCols: 8, kindRows: 4, kindW: 2, kindH: 2, autotile: "group",    desc: "Building autotiles" },
+          kindCols: 8, kindRows: 4, kindW: 2, kindH: 2, autotile: "group",    desc: t("asset.building_autotiles") },
     A4: { cols: 16, rows: 15, w: 768, h: 720, passDefault: true,  terrain: true,
-          kindCols: 8, kindRows: 3, kindW: 2, kindH: 5, autotile: "wall",     desc: "Wall autotiles" },
+          kindCols: 8, kindRows: 3, kindW: 2, kindH: 5, autotile: "wall",     desc: t("asset.wall_autotiles") },
     A5: { cols: 8,  rows: 16, w: 384, h: 768, passDefault: true,  terrain: true,
-          kindCols: 8, kindRows: 16, kindW: 1, kindH: 1, autotile: false,      desc: "Normal tiles" },
+          kindCols: 8, kindRows: 16, kindW: 1, kindH: 1, autotile: false,      desc: t("asset.normal_tiles") },
     B:  { cols: 16, rows: 16, w: 768, h: 768, passDefault: false, terrain: false,
-          kindCols: 16, kindRows: 16, kindW: 1, kindH: 1, autotile: false,      desc: "Object tiles" },
+          kindCols: 16, kindRows: 16, kindW: 1, kindH: 1, autotile: false,      desc: t("asset.object_tiles") },
     C:  { cols: 16, rows: 16, w: 768, h: 768, passDefault: false, terrain: false,
-          kindCols: 16, kindRows: 16, kindW: 1, kindH: 1, autotile: false,      desc: "Object tiles" },
+          kindCols: 16, kindRows: 16, kindW: 1, kindH: 1, autotile: false,      desc: t("asset.object_tiles") },
     D:  { cols: 16, rows: 16, w: 768, h: 768, passDefault: false, terrain: false,
-          kindCols: 16, kindRows: 16, kindW: 1, kindH: 1, autotile: false,      desc: "Object tiles" },
+          kindCols: 16, kindRows: 16, kindW: 1, kindH: 1, autotile: false,      desc: t("asset.object_tiles") },
     E:  { cols: 16, rows: 16, w: 768, h: 768, passDefault: false, terrain: false,
-          kindCols: 16, kindRows: 16, kindW: 1, kindH: 1, autotile: false,      desc: "Object tiles" },
+          kindCols: 16, kindRows: 16, kindW: 1, kindH: 1, autotile: false,      desc: t("asset.object_tiles") },
   };
   // MZ tileset name pattern: TileA1.png, TileA2.png, ..., Shop_Outside_TileA2.png, etc.
   const MZ_TILESET_RE = /^(?:.+_)?Tile(A[1-5]|[B-E])\.png$/i;
@@ -164,6 +166,65 @@ const Assets = (() => {
       } catch (e) { console.warn(e.message); }
     }
     return ready;
+  }
+
+  // ---------- tile flags (32-bit per tile) ----------
+  // Bit layout: 0-1=passage, 2-5=directional(N,S,E,W), 6=ladder, 7=bush,
+  //             8=counter, 9=damageFloor, 10-12=terrainTag(0-7), 13-31=reserved
+  const TF_PASS_SHIFT = 0;
+  const TF_PASS_MASK  = 0x0003;
+  const TF_PASS_O     = 0; // passable
+  const TF_PASS_X     = 1; // blocked
+  const TF_PASS_STAR  = 2; // star (pass only from same layer)
+  const TF_DIR_N      = 0x0004;
+  const TF_DIR_S      = 0x0008;
+  const TF_DIR_E      = 0x0010;
+  const TF_DIR_W      = 0x0020;
+  const TF_DIR_MASK   = 0x003C;
+  const TF_LADDER     = 0x0040;
+  const TF_BUSH       = 0x0080;
+  const TF_COUNTER    = 0x0100;
+  const TF_DAMAGE     = 0x0200;
+  const TF_TERRAIN_SHIFT = 10;
+  const TF_TERRAIN_MASK  = 0x1C00;
+  const TF_PASS_DEFAULT  = 0xFFFFFFFF; // sentinel: use tile default
+
+  const tileFlags = {}; // tilesetKey -> Uint32Array or plain array of flag values
+
+  function initTileFlags(tilesetKey, count) {
+    const arr = new Uint32Array(count);
+    arr.fill(TF_PASS_DEFAULT);
+    tileFlags[tilesetKey] = arr;
+    return arr;
+  }
+  function getTileFlags(tilesetKey, tileSubIndex) {
+    const arr = tileFlags[tilesetKey];
+    if (!arr || tileSubIndex == null || tileSubIndex < 0 || tileSubIndex >= arr.length) return 0;
+    const v = arr[tileSubIndex];
+    return v === TF_PASS_DEFAULT ? 0 : v;
+  }
+  function setTileFlags(tilesetKey, tileSubIndex, value) {
+    const arr = tileFlags[tilesetKey];
+    if (!arr || tileSubIndex == null || tileSubIndex < 0 || tileSubIndex >= arr.length) return;
+    arr[tileSubIndex] = value;
+  }
+  function loadTileFlags(tilesetKey, data) {
+    const arr = tileFlags[tilesetKey];
+    if (!arr || !data || !Array.isArray(data)) return;
+    for (let i = 0; i < Math.min(data.length, arr.length); i++) {
+      arr[i] = Number(data[i]) || 0;
+    }
+  }
+  function exportTileFlags(tilesetKey) {
+    const arr = tileFlags[tilesetKey];
+    if (!arr) return [];
+    return Array.from(arr);
+  }
+  function syncTileFlagsToProject(project) {
+    for (const tsKey of Object.keys(tileFlags)) {
+      if (!project.tilesets[tsKey]) continue;
+      project.tilesets[tsKey].tileFlags = exportTileFlags(tsKey);
+    }
   }
 
   // ---------- autotile system (Phase 3) ----------
@@ -1413,6 +1474,8 @@ const Assets = (() => {
             tileIds: tileIds,
             image: img,
           };
+          // Initialize tile flags for this tileset
+          initTileFlags(tilesetKey, totalTiles);
           // Add to project tilesets registry
           project.tilesets = project.tilesets || {};
           project.tilesets[tilesetKey] = {
@@ -1456,7 +1519,16 @@ const Assets = (() => {
   }
   async function loadExternalAssets(project) {
     if (!preparedExternal) preparedExternal = await prepareExternalAssets(await discoverExternalAssets());
-    return bindExternalAssets(project);
+    const result = bindExternalAssets(project);
+    // Restore tile flags from project data
+    if (project.tilesets) {
+      for (const [tsKey, tsData] of Object.entries(project.tilesets)) {
+        if (tsData.tileFlags && tileFlags[tsKey]) {
+          loadTileFlags(tsKey, tsData.tileFlags);
+        }
+      }
+    }
+    return result;
   }
   function collectUsedExternalKeys(project) {
     const used = new Set();
@@ -1547,6 +1619,14 @@ const Assets = (() => {
     solveFloorSignature, solveWallMask,
     composeFloorAutotile, composeWallAutotile, composeAutotile,
     resolveA1Frame, detectNeighbors, placementsAdjacent,
+    // Tile flags (32-bit per tile)
+    TF_PASS_O, TF_PASS_X, TF_PASS_STAR,
+    TF_DIR_N, TF_DIR_S, TF_DIR_E, TF_DIR_W,
+    TF_LADDER, TF_BUSH, TF_COUNTER, TF_DAMAGE,
+    TF_PASS_MASK, TF_DIR_MASK, TF_TERRAIN_MASK, TF_PASS_DEFAULT,
+    tileFlags,
+    getTileFlags, setTileFlags,
+    loadTileFlags, exportTileFlags, syncTileFlagsToProject,
   };
 })();
 

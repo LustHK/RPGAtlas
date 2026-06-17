@@ -64,13 +64,26 @@
     if (!map || !map.width) return world;
 
     // ---- Phase 5 — Grid-free physics world ----
+    function tileIsBlocked(tile) {
+      if (!tile) return true;
+      if (tile.tileset && typeof assets.getTileFlags === "function") {
+        const ts = assets.tilesets[tile.tileset];
+        const si = tile.tilesetY * (ts ? ts.cols : 16) + tile.tilesetX;
+        const flags = assets.getTileFlags(tile.tileset, si);
+        if (flags !== assets.TF_PASS_DEFAULT) {
+          const pass = flags & assets.TF_PASS_MASK;
+          return pass === assets.TF_PASS_X;
+        }
+      }
+      return tile.pass === false;
+    }
     if (map.gridFree && map.tilePlacements) {
       const layers = ["ground", "decor", "decor2", "over"];
       for (const ln of layers) {
         const arr = map.tilePlacements[ln] || [];
         for (const p of arr) {
           const tile = assets.tiles[p.tileId];
-          if (!tile || tile.pass !== false) continue;
+          if (!tile || !tileIsBlocked(tile)) continue;
           if (tile.collision && tile.collision.type === "box") {
             const c = tile.collision;
             world.tileBodies.push({
@@ -136,7 +149,7 @@
           d2 &&
           assets.tiles &&
           assets.tiles[d2] &&
-          assets.tiles[d2].pass === false
+          tileIsBlocked(assets.tiles[d2])
         ) {
           const def = assets.tiles[d2];
           if (def.collision && def.collision.type === "box") {
@@ -162,7 +175,7 @@
           d &&
           assets.tiles &&
           assets.tiles[d] &&
-          assets.tiles[d].pass === false
+          tileIsBlocked(assets.tiles[d])
         ) {
           const def = assets.tiles[d];
           if (def.collision && def.collision.type === "box") {
@@ -194,7 +207,7 @@
           });
           continue;
         }
-        if (assets.tiles && assets.tiles[g] && assets.tiles[g].pass === false) {
+        if (assets.tiles && assets.tiles[g] && tileIsBlocked(assets.tiles[g])) {
           const def = assets.tiles[g];
           if (def.collision && def.collision.type === "box") {
             const c = def.collision;

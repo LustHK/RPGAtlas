@@ -1,0 +1,13 @@
+{
+  "name": "new-rpg-project",
+  "description": "A game created with RPGAtlas",
+  "version": "1.0.0",
+  "private": true,
+  "window": {
+    "title": "Untitled RPG",
+    "width": 816,
+    "height": 624,
+    "resizable": true
+  },
+  "main": "index.html"
+}

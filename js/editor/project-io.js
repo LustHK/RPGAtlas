@@ -2,6 +2,8 @@
    Project persistence and standalone build/export helpers.
    GPL-3.0-or-later (see LICENSE). */
 
+import * as host from "./host.js";
+
 export function loadStoredProject(storage, migrateProject) {
   try {
     const legacy = !storage.getItem("rpgatlas_project");
@@ -165,4 +167,55 @@ export async function exportWindowsExecutable(project, Assets) {
       { type: "application/vnd.microsoft.portable-executable" }),
     game.baseName + ".exe",
   );
+}
+
+// ============================ Folder-based Project API ============================
+
+/**
+ * Open a project from a folder using Tauri native dialog + folder loading.
+ * Falls back to the single-file .json import for browser use.
+ */
+export async function openProjectFromFolder(migrateProject) {
+  if (!host.isTauri) {
+    return null; // Browser fallback: use the standard file import
+  }
+
+  const folderPath = await host.pickFolder();
+  if (!folderPath) return null;
+
+  const project = await host.loadProjectFromFolder(folderPath);
+  if (!project) return null;
+
+  // Ensure maps array exists
+  if (!project.maps) project.maps = [];
+
+  // Run project migration
+  const migrated = migrateProject(project);
+  return { project: migrated, path: folderPath };
+}
+
+/**
+ * Save a project to a folder path using Tauri native commands.
+ */
+export async function saveProjectToFolder(path, project) {
+  if (!host.isTauri) return false;
+
+  try {
+    await host.saveProjectToFolder(path, project);
+    return true;
+  } catch (e) {
+    console.error("saveProjectToFolder failed:", e);
+    return false;
+  }
+}
+
+/**
+ * Sanitize a project name for use as a folder name.
+ */
+export function sanitizeProjectName(name, fallback) {
+  return (name || fallback)
+    .toLowerCase()
+    .replace(/[^a-z0-9\-_ ]/g, "")
+    .trim()
+    .replace(/ +/g, "_") || "new_project";
 }

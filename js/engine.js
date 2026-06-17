@@ -28,6 +28,7 @@ const _createMessageSystem = window.createMessageSystem;
   let proj = null;
   let stage, canvas, ctx, uiLayer, fader;
   let scene = "boot"; // boot | title | map | battle | gameover
+  let i18n, t;
   let menuOpen = false;
   let cameraZoom = 1;
   let _camSmoothX = 0, _camSmoothY = 0;
@@ -373,25 +374,23 @@ const _createMessageSystem = window.createMessageSystem;
       return String(t.key).toUpperCase() + " " + value + "%";
     if (t.type === "element") {
       const e = RA.typeList(proj, "elements").find((x) => x.key === t.key);
-      return (e ? e.name : t.key) + " damage " + value + "%";
+      return (e ? e.name : t.key) + " " + t("game.damage_suffix", { value: value });
     }
     if (t.type === "state") {
       const state = RA.byId(proj.states || [], Number(t.key));
-      return (state ? state.name : "State " + t.key) + " chance " + value + "%";
+      return (state ? state.name : t("game.state_generic", { id: t.key })) + " " + t("game.chance_suffix", { value: value });
     }
     if (t.type === "skill")
       return (
         String(t.key).replace(/^\w/, (c) => c.toUpperCase()) +
-        " skill power " +
-        value +
-        "%"
+        " " + t("game.skill_power_suffix", { value: value })
       );
     if (t.type === "equip") {
       const item = RA.byId(
         t.key === "armor" ? proj.armors : proj.weapons,
         value,
       );
-      return "Can equip " + (item ? item.name : t.key + " " + value);
+      return item ? t("game.can_equip", { name: item.name }) : t("game.can_equip_generic", { kind: t.key, id: value });
     }
     const special = RA.TRAIT_SPECIALS.find((x) => x.v === t.key);
     return (
@@ -1819,20 +1818,20 @@ const _createMessageSystem = window.createMessageSystem;
         refreshPanel();
         const i = await showList(
           [            
-            { html: Assets.iconHtml(24, "menu-icon") + "Items" },
-            { html: Assets.iconHtml(8, "menu-icon") + "Skills" },
-            { html: Assets.iconHtml(48, "menu-icon") + "Equip" },
+            { html: Assets.iconHtml(24, "menu-icon") + t("game.items") },
+            { html: Assets.iconHtml(8, "menu-icon") + t("game.skills") },
+            { html: Assets.iconHtml(48, "menu-icon") + t("game.equip") },
             {
               html:
                 Assets.iconHtml(
                   (actorClass(G.party[0]) || {}).icon,
                   "menu-icon",
-                ) + "Status",
+                ) + t("game.status"),
             },
-            { html: Assets.iconHtml(16, "menu-icon") + "Journal" },
-            { html: Assets.iconHtml(44, "menu-icon") + "Save" },
-            { html: Assets.iconHtml(45, "menu-icon") + "Load" },
-            { html: Assets.iconHtml(47, "menu-icon") + "To Title" },
+            { html: Assets.iconHtml(16, "menu-icon") + t("journal.title") },
+            { html: Assets.iconHtml(44, "menu-icon") + t("btn.save") },
+            { html: Assets.iconHtml(45, "menu-icon") + t("btn.load") },
+            { html: Assets.iconHtml(47, "menu-icon") + t("game.to_title") },
           ],
           { className: "mainmenu", start: idx },
         );
@@ -1860,7 +1859,7 @@ const _createMessageSystem = window.createMessageSystem;
           if (await saveLoadMenu("load")) break;
         } else if (i === 7) {
           const c = await showList(
-            [{ label: "Return to title" }, { label: "Cancel" }],
+            [{ label: t("game.return_to_title") }, { label: t("btn.cancel") }],
             { className: "choicewin" },
           );
           if (c === 0) {
@@ -2164,11 +2163,11 @@ const _createMessageSystem = window.createMessageSystem;
   // ============================ shop ============================
   const Shop = {
     async run(goods) {
-      const goldLine = () => "Gold: " + G.gold + " " + proj.system.currency;
+      const goldLine = () => t("game.shop_gold", { gold: G.gold, currency: proj.system.currency });
       while (true) {
         const i = await showList(
-          [{ label: "Buy" }, { label: "Sell" }, { label: "Leave" }],
-          { title: "Shop — " + goldLine(), className: "shopwin" },
+          [{ label: t("btn.buy") }, { label: t("btn.sell") }, { label: t("btn.leave") }],
+          { title: t("game.shop", { gold: goldLine() }), className: "shopwin" },
         );
         if (i < 0 || i === 2) return;
         if (i === 0) {
@@ -2229,7 +2228,7 @@ const _createMessageSystem = window.createMessageSystem;
                   proj.system.currency +
                   "</span>",
               })),
-              { title: "Sell — " + goldLine(), className: "shopwin" },
+              { title: t("btn.sell") + " — " + goldLine(), className: "shopwin" },
             );
             if (si < 0) break;
             const { kind, e } = owned[si];
@@ -2602,18 +2601,18 @@ const _createMessageSystem = window.createMessageSystem;
       async function actorCommand(a) {
         while (true) {
           const items = [
-            { html: Assets.iconHtml(48, "menu-icon") + "Attack" },
+            { html: Assets.iconHtml(48, "menu-icon") + t("game.attack") },
             {
-              html: Assets.iconHtml(8, "menu-icon") + "Skills",
+              html: Assets.iconHtml(8, "menu-icon") + t("game.skills"),
               disabled: !learnedSkills(a).length,
             },
             {
-              html: Assets.iconHtml(24, "menu-icon") + "Items",
+              html: Assets.iconHtml(24, "menu-icon") + t("game.items"),
               disabled: !proj.items.some((it) => invCount("item", it.id) > 0),
             },
-            { html: Assets.iconHtml(22, "menu-icon") + "Guard" },
+            { html: Assets.iconHtml(22, "menu-icon") + t("game.guard") },
             {
-              html: Assets.iconHtml(7, "menu-icon") + "Escape",
+              html: Assets.iconHtml(7, "menu-icon") + t("game.escape"),
               disabled: !canEscape,
             },
           ];
@@ -2889,7 +2888,7 @@ const _createMessageSystem = window.createMessageSystem;
 
       let result = null;
       try {
-        await say("Enemies appear!", 700);
+        await say(t("game.enemies_appear"), 700);
         battleLoop: while (true) {
           refreshParty();
           refreshEnemies();
@@ -2913,7 +2912,7 @@ const _createMessageSystem = window.createMessageSystem;
               const chance = clamp(0.55 + (pa - ea) * 0.03, 0.2, 0.95);
               if (Math.random() < chance) {
                 sysSe("escape");
-                await say("Got away safely!", 800);
+                await say(t("game.escape_success"), 800);
                 result = "escape";
                 break battleLoop;
               } else {
@@ -3376,7 +3375,7 @@ const _createMessageSystem = window.createMessageSystem;
     const gw = el(
       "div",
       "gameoverwin",
-      "<div>GAME OVER</div><div class='go-sub'>press confirm</div>",
+      "<div>" + t("game.game_over") + "</div><div class='go-sub'>" + t("game.press_confirm") + "</div>",
     );
     uiLayer.appendChild(gw);
     await new Promise((resolve) => {
@@ -3399,6 +3398,48 @@ const _createMessageSystem = window.createMessageSystem;
   }
 
   // ============================ boot ============================
+  async function loadProjectFromPath(path) {
+    const loadFile = (file) =>
+      fetch(path.replace(/\/$/, "") + "/data/" + file)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
+
+    try {
+      const system = await loadFile("System.json");
+      if (!system) return null;
+
+      const project = { ...system };
+
+      const sections = [
+        "Actors", "Classes", "Skills", "Items", "Weapons", "Armors",
+        "Enemies", "Troops", "States", "Animations", "Tilesets", "CommonEvents",
+      ];
+      for (const s of sections) {
+        const key = s[0].toLowerCase() + s.slice(1);
+        const data = await loadFile(s + ".json");
+        if (data) project[key] = data;
+      }
+
+      // Load maps
+      project.maps = [];
+      const mapInfos = await loadFile("MapInfos.json");
+      if (Array.isArray(mapInfos)) {
+        for (const info of mapInfos) {
+          const id = info && info.id;
+          if (id) {
+            const mapData = await loadFile("Map" + String(id).padStart(3, "0") + ".json");
+            if (mapData) project.maps.push(mapData);
+          }
+        }
+      }
+
+      return RA.migrateProject(project);
+    } catch (e) {
+      console.warn("Could not load project from path:", path, e);
+      return null;
+    }
+  }
+
   function loadProject() {
     if (window.RPGATLAS_PROJECT)
       return RA.migrateProject(RA.clone(window.RPGATLAS_PROJECT));
@@ -3471,6 +3512,13 @@ const _createMessageSystem = window.createMessageSystem;
   }
 
   async function boot() {
+    i18n = await RPGAtlasI18n.create({
+      storage: window.localStorage,
+      browserLocale: navigator.language,
+      document: window.document,
+    });
+    t = i18n.t;
+
     stage = document.getElementById("stage");
     canvas = document.getElementById("gamecanvas");
     ctx = canvas.getContext("2d");
@@ -3479,7 +3527,7 @@ const _createMessageSystem = window.createMessageSystem;
     fader = el("div", "fader");
     stage.appendChild(fader);
     fader.style.opacity = 0;
-    document.title = "RPGAtlas Player";
+    document.title = t("game.player_title");
 
     window.addEventListener("error", (e) => {
       const box = el(
@@ -3495,14 +3543,21 @@ const _createMessageSystem = window.createMessageSystem;
       setTimeout(() => box.remove(), 8000);
     });
 
-    proj = loadProject();
+    // Check URL for project path parameter (standalone folder playback)
+    const urlParams = new URLSearchParams(window.location.search);
+    const projectPathParam = urlParams.get("projectPath");
+    if (projectPathParam) {
+      const folderProj = await loadProjectFromPath(projectPathParam);
+      if (folderProj) proj = folderProj;
+    }
+    if (!proj) proj = loadProject();
     applyScreenSettings();
     window.addEventListener("resize", fitStage);
     fitStage();
     Assets.registerCustomChars(proj.customChars);
     await Promise.all([Assets.loadIconSet(), Assets.loadExternalAssets(proj)]);
     Plugins.runAll();
-    document.title = (proj.system.title || "RPGAtlas") + " — RPGAtlas Player";
+    document.title = (proj.system.title || "RPGAtlas") + " — " + t("game.player_title");
     scene = "title";
     showTitle();
     requestAnimationFrame(loop);   // kick off via rAF so loop() receives a real timestamp

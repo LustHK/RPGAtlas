@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RPGAtlas Player</title>
+    <link rel="stylesheet" href="css/play.css" />
+  </head>
+  <body>
+    <div id="stage">
+      <canvas id="gamecanvas"></canvas>
+    </div>
+
+    <!--
+      Engine path configuration.
+      By default the project folder sits inside the engine distribution, so
+      engine scripts are at "../engine/js/".  When running via the desktop
+      editor the engine path is resolved automatically.  Override by setting
+      window.RPGATLAS_ENGINE_PATH before this script, or by editing the line
+      below.
+    -->
+    <script>
+      (function () {
+        var ep = window.RPGATLAS_ENGINE_PATH;
+        if (!ep) {
+          // Default: one level up from the project folder, inside the engine dist
+          ep = "../";  // <-- change this if your engine is elsewhere
+        }
+        if (ep.charAt(ep.length - 1) !== "/") ep += "/";
+
+        var scripts = [
+          ep + "js/vendor/pixi.min.js",
+          ep + "js/assets.js",
+          ep + "js/i18n.js",
+          ep + "js/renderer.js",
+          ep + "js/post-processing.js",
+          ep + "js/particles.js",
+          ep + "js/runtime/messages.js",
+          ep + "js/sfx.js",
+          ep + "js/plugins.js",
+          ep + "js/data.js",
+          ep + "js/physics.js",
+          ep + "js/quests.js",
+          ep + "js/journal-view.js",
+          ep + "js/engine.js",
+        ];
+
+        // Also pass the project path so the engine can load data/*.json
+        window.RPGATLAS_PROJECT_PATH = ".";
+
+        function loadNext(i) {
+          if (i >= scripts.length) return;
+          var s = document.createElement("script");
+          s.src = scripts[i];
+          s.onload = function () { loadNext(i + 1); };
+          s.onerror = function () {
+            console.error("Failed to load engine script:", scripts[i]);
+            loadNext(i + 1);
+          };
+          document.body.appendChild(s);
+        }
+
+        // Inject the RPGAtlasDeps script between data.js and engine.js
+        var depsScript = document.createElement("script");
+        depsScript.textContent =
+          "window.RPGAtlasDeps = {" +
+            "Assets: window.Assets," +
+            "AtlasBuiltins: window.AtlasBuiltins," +
+            "DataDefaults: window.DataDefaults," +
+            "Renderer: window.Renderer," +
+            "GLRender: window.Renderer," +
+            "Music: window.Music," +
+            "RA: window.RA," +
+            "Sfx: window.Sfx" +
+          "};";
+
+        document.body.appendChild(depsScript);
+
+        loadNext(0);
+      })();
+    </script>
+  </body>
+</html>

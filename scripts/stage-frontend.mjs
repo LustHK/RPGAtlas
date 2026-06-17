@@ -15,8 +15,9 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const dist = join(root, "src-tauri", "dist");
 
 // Everything the editor and player need at runtime. bin/ ships the launcher
-// used by the "Windows EXE" game-export feature.
-const include = ["index.html", "play.html", "css", "js", "img", "bin"];
+// used by the "Windows EXE" game-export feature. resources/ holds the RTP
+// template used by the project generator.
+const include = ["index.html", "play.html", "css", "js", "img", "bin", "resources"];
 
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(dist, { recursive: true });

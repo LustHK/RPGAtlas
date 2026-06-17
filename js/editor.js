@@ -9,13 +9,16 @@ import {
   exportWindowsExecutable as writeWindowsExecutable,
   loadStoredProject,
   saveProject,
+  openProjectFromFolder,
+  saveProjectToFolder,
 } from "./editor/project-io.js";
+import { createNewProject, sanitizeProjectName } from "./editor/project-generator.js";
 import * as host from "./editor/host.js";
-import { createEditorI18n } from "./editor/i18n.js";
-import { PATCH_NOTES } from "./patch-notes.js";
+const { create: createEditorI18n } = window.RPGAtlasI18n;
+import { getPatchNotes } from "./patch-notes.js";
 
 const { Assets, AtlasBuiltins, DataDefaults, GLRender, Music, RA, Sfx } = window.RPGAtlasDeps;
-const editorI18n = createEditorI18n({
+const editorI18n = await createEditorI18n({
   storage: window.localStorage,
   document,
   browserLocale: navigator.language,
@@ -25,14 +28,14 @@ const editorI18n = createEditorI18n({
   const t = editorI18n.t;
   const TILE = Assets.TILE;
   const LAYER_ORDER = ["ground", "decor", "decor2", "over"];
-  const LAYER_LABELS = { auto: "Auto layer", ground: "Layer 1 (Ground)", decor: "Layer 2 (Decor)", decor2: "Layer 3 (Decor 2)", over: "Layer 4 (Overhead)" };
-  const TOOL_LABELS = { pen: "Pen", erase: "Eraser", rect: "Rectangle", circle: "Circle", fill: "Fill", shadow: "Shadow Pen" };
+  const LAYER_LABELS = { auto: "layer.auto", ground: "layer.ground", decor: "layer.decor", decor2: "layer.decor2", over: "layer.over" };
+  const TOOL_LABELS = { pen: "tool.pen", erase: "tool.eraser", rect: "tool.rectangle", circle: "tool.circle", fill: "tool.fill", shadow: "tool.shadow_pen" };
   const ZOOMS = [0.25, 1 / 3, 0.5, 2 / 3, 0.75, 1, 1.5, 2];
   let proj = null;
   let curMapId = 1;
   let layer = "auto";        // auto | ground | decor | decor2 | over
   let tool = "pen";          // pen | erase | rect | circle | fill | shadow
-  let mode = "map";          // map | event | pass | start | height | collision
+  let mode = "map";          // map | event | pass | start | height | collision | flags
   let selectedTile = 1;
   let heightVal = 1;         // HD-2D elevation value painted in height mode (0–9)
   let zoom = 0.75;
@@ -63,6 +66,15 @@ const editorI18n = createEditorI18n({
   let dragPlacementLayer = null;   // layer of the placement being dragged
   let dragPlacementOffset = null;  // {dx, dy} from mouse to placement origin
   let dragPlacementPushed = false; // undo snapshot taken for the current drag
+
+  // ---- tile flags mode state ----
+  let flagsTool = "passage"; // passage | dir-n | dir-s | dir-e | dir-w | ladder | bush | counter | damage | terrain
+  let flagsTerrainVal = 0;  // terrain tag value 0-7
+
+  // ---- palette marquee selection ----
+  let paletteMarqueeStart = null; // {row, col} for B-E marquee drag
+  let paletteMarqueeEnd = null;
+  let paletteMarqueeTiles = [];   // selected tile IDs from marquee
 
   // collision editor state (in-map visual editor)
   let collisionEditCell = null; // {x,y}
@@ -214,7 +226,7 @@ const editorI18n = createEditorI18n({
       overlay.remove();
       if (opts.onClose) opts.onClose(result);
     }
-    (opts.buttons || [{ label: "Close" }]).forEach((b) => {
+    (opts.buttons || [{ label: "btn.close" }]).forEach((b) => {
       btnrow.appendChild(h("button", {
         class: b.primary ? "primary" : "",
         onclick() { if (b.onClick) b.onClick(close); else close(); },
@@ -228,11 +240,11 @@ const editorI18n = createEditorI18n({
   }
   function confirmBox(text, onYes) {
     modal({
-      title: "Confirm",
+      title: "dialog.confirm",
       content: h("div", null, text),
       buttons: [
-        { label: "OK", primary: true, onClick(c) { c(); onYes(); } },
-        { label: "Cancel" },
+        { label: "btn.ok", primary: true, onClick(c) { c(); onYes(); } },
+        { label: "btn.cancel" },
       ],
     });
   }
@@ -240,7 +252,7 @@ const editorI18n = createEditorI18n({
   // ============================ persistence ============================
   let saveTimer = null;
   function touch() {
-    $("save-ind").textContent = "● " + t("unsaved");
+    $("save-ind").textContent = "● " + t("status.unsaved");
     clearTimeout(saveTimer);
     saveTimer = setTimeout(saveNow, 700);
     hdMarkDirty(); // keep the HD-2D preview in sync with edits
@@ -248,9 +260,9 @@ const editorI18n = createEditorI18n({
   function saveNow() {
     try {
       saveProject(localStorage, proj);
-      $("save-ind").textContent = "✓ " + t("saved");
+      $("save-ind").textContent = "✓ " + t("status.saved");
     } catch (e) {
-      $("save-ind").textContent = "⚠ " + t("save failed");
+      $("save-ind").textContent = "⚠ " + t("status.save_failed");
       console.error(e);
     }
   }
@@ -264,16 +276,23 @@ const editorI18n = createEditorI18n({
   async function desktopSave(saveAs) {
     saveNow(); // keep the local autosave as a crash-recovery copy
     try {
+      // If we have a current project folder, save there instead
+      if (currentProjectFolderPath && !saveAs) {
+        const ok = await saveProjectToFolder(currentProjectFolderPath, proj);
+        if (ok) flashStatus("Project saved to " + baseName(currentProjectFolderPath));
+        else flashStatus("Save to folder failed.");
+        return;
+      }
       if (saveAs || !currentProjectPath) {
         const path = await host.saveProjectToFile(proj); // native Save dialog
-        if (!path) { flashStatus("Saved locally — file save cancelled"); return; }
+        if (!path) { flashStatus(t("status.save_cancelled")); return; }
         currentProjectPath = path;
       } else {
         await host.saveProjectToPath(currentProjectPath, proj); // silent overwrite
       }
-      flashStatus("Project saved to " + baseName(currentProjectPath));
+      flashStatus(t("status.project_saved") + baseName(currentProjectPath));
     } catch (e) {
-      flashStatus("Save failed: " + e.message);
+      flashStatus(t("status.save_failed") + e.message);
     }
   }
   function exportProject() {
@@ -287,25 +306,25 @@ const editorI18n = createEditorI18n({
       h("p", { class: "dim" }, "The launcher is unsigned, so Windows may show a security warning. Save slots are kept in the player's browser."),
     );
     modal({
-      title: "Export Standalone Game",
+      title: t("dialog.export_game"),
       content,
       buttons: [
         { label: "Windows EXE", primary: true, async onClick(close) {
           try {
             await writeWindowsExecutable(proj, Assets);
             close();
-            flashStatus("Windows game executable exported");
+            flashStatus(t("status.export_windows_success"));
           } catch (e) {
-            alert("Game export failed: " + e.message);
+            alert(t("status.export_failed") + e.message);
           }
         } },
         { label: "Standalone HTML", async onClick(close) {
           try {
             await writeStandaloneHtml(proj, Assets);
             close();
-            flashStatus("Standalone HTML game exported");
+            flashStatus(t("status.export_html_success"));
           } catch (e) {
-            alert("Game export failed: " + e.message);
+            alert(t("status.export_failed") + e.message);
           }
         } },
         { label: "Cancel" },
@@ -329,6 +348,122 @@ const editorI18n = createEditorI18n({
       } catch (e) { alert("Import failed: " + e.message); }
     };
     r.readAsText(file);
+  }
+
+  // ============================ project folder management ============================
+  let currentProjectFolderPath = null;
+
+  function setProjectFolderPath(path) {
+    currentProjectFolderPath = path;
+    try { localStorage.setItem("rpgatlas_project_folder", path || ""); } catch (e) { /* ignore */ }
+  }
+
+  function resetProject(project) {
+    proj = project;
+    Assets.registerCustomChars(proj.customChars);
+    Assets.bindExternalAssets(proj);
+    if (proj.maps && proj.maps.length) curMapId = proj.maps[0].id;
+    selectedEvent = null; selection = null; pasteMode = null;
+    undoStack.length = 0; redoStack.length = 0;
+    rebuildAll(); touch();
+  }
+
+  async function openNewProjectDialog() {
+    const nameInput = h("input", { id: "new-proj-name", type: "text", placeholder: "my_rpg_game", value: "new_project" });
+    const titleInput = h("input", { id: "new-proj-title", type: "text", placeholder: "My RPG Game", value: "Untitled RPG" });
+    const destInput = h("input", { id: "new-proj-dest", type: "text", readonly: true, placeholder: "Select a folder…" });
+    const browseBtn = h("button", { id: "new-proj-browse", class: "mini" }, t("dialog.browse"));
+
+    let selectedDest = null;
+    browseBtn.addEventListener("click", async () => {
+      const folder = await host.pickFolder();
+      if (folder) {
+        selectedDest = folder;
+        destInput.value = folder;
+      }
+    });
+
+    const content = h("div", { class: "new-proj-form" },
+      h("label", null, t("dialog.new_project_name") || "Project Name:"),
+      nameInput,
+      h("label", null, t("dialog.new_project_title") || "Game Title:"),
+      titleInput,
+      h("label", null, t("dialog.new_project_destination") || "Destination:"),
+      h("div", { class: "folder-picker-row" }, destInput, browseBtn),
+    );
+
+    modal({
+      title: t("dialog.new_project") || "Create New Project",
+      content,
+      buttons: [
+        { label: t("dialog.create") || "Create", primary: true, onClick: async (close) => {
+          const projName = nameInput.value.trim();
+          const gameTitle = titleInput.value.trim() || projName;
+          if (!selectedDest) { alert("Please select a destination folder."); return; }
+          if (!projName) { alert("Please enter a project name."); return; }
+
+          close();
+          flashStatus("Creating project…");
+          const result = await createNewProject(projName, gameTitle, selectedDest);
+          if (!result.success) {
+            alert("Failed to create project: " + result.error);
+            flashStatus(t("status.ready"));
+            return;
+          }
+
+          if (result.project) {
+            setProjectFolderPath(result.path);
+            resetProject(result.project);
+            flashStatus(t("status.project_created", { path: result.path }) || "Project created at " + result.path);
+          } else if (host.isTauri && result.path) {
+            const loaded = await host.loadProjectFromFolder(result.path);
+            if (loaded) {
+              setProjectFolderPath(result.path);
+              resetProject(loaded);
+              flashStatus(t("status.project_created", { path: result.path }) || "Project created at " + result.path);
+            }
+          }
+        } },
+        { label: "btn.cancel" },
+      ],
+    });
+  }
+
+  async function openProjectFolderFlow() {
+    if (!host.isTauri) {
+      flashStatus("Open folder is only available in the desktop app.");
+      return;
+    }
+
+    const result = await openProjectFromFolder((project) => RA.migrateProject(project));
+    if (!result) return;
+
+    setProjectFolderPath(result.path);
+    resetProject(result.project);
+    flashStatus(t("status.project_loaded", { path: result.path }) || "Project loaded from " + result.path);
+  }
+
+  async function saveProjectFolderFlow() {
+    if (!host.isTauri) {
+      flashStatus("Save to folder is only available in the desktop app.");
+      return;
+    }
+
+    saveNow();
+    if (currentProjectFolderPath) {
+      const ok = await saveProjectToFolder(currentProjectFolderPath, proj);
+      if (ok) flashStatus("Project saved to folder.");
+      else flashStatus("Save to folder failed.");
+    } else {
+      const folder = await host.pickFolder();
+      if (!folder) return;
+      const projName = sanitizeProjectName(proj.system.title || "project", "project");
+      const path = folder.replace(/\\/g, "/").replace(/\/$/, "") + "/" + projName;
+      setProjectFolderPath(path);
+      const ok = await saveProjectToFolder(path, proj);
+      if (ok) flashStatus("Project saved to folder.");
+      else flashStatus("Save to folder failed.");
+    }
   }
 
   // ============================ map rendering ============================
@@ -461,6 +596,123 @@ const editorI18n = createEditorI18n({
       g.setLineDash([]);
     }
   }
+  // ---- tile flags overlay ----
+  function tileSubIndex(tile) {
+    if (!tile || !tile.tileset) return -1;
+    const ts = Assets.tilesets[tile.tileset];
+    if (!ts) return -1;
+    return tile.tilesetY * ts.cols + tile.tilesetX;
+  }
+  function flagsOfTile(tileId) {
+    const tile = Assets.tiles[tileId];
+    if (!tile || !tile.tileset) return 0;
+    const si = tileSubIndex(tile);
+    if (si < 0) return 0;
+    return Assets.getTileFlags(tile.tileset, si);
+  }
+  function flagsOfPlacement(cell, m) {
+    if (m.gridFree && m.tilePlacements) {
+      const px = (cell.x + 0.5) * TILE;
+      const py = (cell.y + 0.5) * TILE;
+      const hit = placementAt(px, py);
+      if (hit) return flagsOfTile(hit.placement.tileId);
+      return 0;
+    }
+    const ln = layer === "auto" ? topLayerAt(cell.x, cell.y) : layer;
+    const tid = getCell(cell.x, cell.y, ln) || getCell(cell.x, cell.y, "ground");
+    return flagsOfTile(tid);
+  }
+  function drawFlagsOverlay(g, m) {
+    g.lineWidth = 2.5 / Math.max(zoom, 0.4);
+    for (let y = 0; y < m.height; y++) {
+      for (let x = 0; x < m.width; x++) {
+        const flags = flagsOfPlacement({x, y}, m);
+        if (!flags) continue;
+        const cx = x * TILE, cy = y * TILE;
+        const passage = flags & Assets.TF_PASS_MASK;
+        // passage badge on the tile
+        if (passage === Assets.TF_PASS_X) {
+          g.strokeStyle = "#ff4444";
+          g.lineWidth = 3 / zoom;
+          const r = TILE * 0.2;
+          g.beginPath();
+          g.moveTo(cx + TILE / 2 - r, cy + TILE / 2 - r);
+          g.lineTo(cx + TILE / 2 + r, cy + TILE / 2 + r);
+          g.moveTo(cx + TILE / 2 + r, cy + TILE / 2 - r);
+          g.lineTo(cx + TILE / 2 - r, cy + TILE / 2 + r);
+          g.stroke();
+        } else if (passage === Assets.TF_PASS_STAR) {
+          g.fillStyle = "#ffd86a";
+          g.font = "bold 14px monospace";
+          g.textAlign = "center"; g.textBaseline = "middle";
+          g.fillText("★", cx + TILE / 2, cy + TILE / 2);
+        }
+        // directional blockers
+        if (flags & Assets.TF_DIR_N) { g.fillStyle = "#ff6644"; g.fillRect(cx + 14, cy + 2, 20, 6); }
+        if (flags & Assets.TF_DIR_S) { g.fillStyle = "#ff6644"; g.fillRect(cx + 14, cy + TILE - 8, 20, 6); }
+        if (flags & Assets.TF_DIR_W) { g.fillStyle = "#ff6644"; g.fillRect(cx + 2, cy + 14, 6, 20); }
+        if (flags & Assets.TF_DIR_E) { g.fillStyle = "#ff6644"; g.fillRect(cx + TILE - 8, cy + 14, 6, 20); }
+        // special flag badges
+        let badge = 0;
+        if (flags & Assets.TF_LADDER) badge++;
+        if (flags & Assets.TF_BUSH) badge++;
+        if (flags & Assets.TF_COUNTER) badge++;
+        if (flags & Assets.TF_DAMAGE) badge++;
+        if (badge) {
+          g.font = "10px monospace"; g.textAlign = "left"; g.textBaseline = "top";
+          if (flags & Assets.TF_LADDER) { g.fillStyle = "#8a6af0"; g.fillText("L", cx + 2, cy + 2); }
+          if (flags & Assets.TF_BUSH) { g.fillStyle = "#6ab84a"; g.fillText("B", cx + 12, cy + 2); }
+          if (flags & Assets.TF_COUNTER) { g.fillStyle = "#f0a030"; g.fillText("C", cx + 22, cy + 2); }
+          if (flags & Assets.TF_DAMAGE) { g.fillStyle = "#f06060"; g.fillText("D", cx + 32, cy + 2); }
+        }
+        // terrain tag
+        const tag = (flags & Assets.TF_TERRAIN_MASK) >> Assets.TF_TERRAIN_SHIFT;
+        if (tag) {
+          g.fillStyle = "#80c0ff";
+          g.font = "10px monospace"; g.textAlign = "right"; g.textBaseline = "bottom";
+          g.fillText("T" + tag, cx + TILE - 2, cy + TILE - 2);
+        }
+      }
+    }
+  }
+  // ---- paint tile flags ----
+  function paintFlags(cell, mask, value) {
+    const m = curMap();
+    const placements = m.gridFree ? m.tilePlacements : null;
+    if (placements) {
+      const px = (cell.x + 0.5) * TILE;
+      const py = (cell.y + 0.5) * TILE;
+      const hit = placementAt(px, py);
+      if (!hit) return;
+      const tile = Assets.tiles[hit.placement.tileId];
+      if (!tile || !tile.tileset) return;
+      const si = tileSubIndex(tile);
+      if (si < 0) return;
+      let cur = Assets.getTileFlags(tile.tileset, si);
+      if (mask === 0xFFFFFFFF) {
+        cur = value;
+      } else {
+        cur = (cur & ~mask) | (value & mask);
+      }
+      Assets.setTileFlags(tile.tileset, si, cur);
+    } else {
+      const ln = layer === "auto" ? topLayerAt(cell.x, cell.y) : layer;
+      const tid = getCell(cell.x, cell.y, ln) || getCell(cell.x, cell.y, "ground");
+      const tile = Assets.tiles[tid];
+      if (!tile || !tile.tileset) return;
+      const si = tileSubIndex(tile);
+      if (si < 0) return;
+      let cur = Assets.getTileFlags(tile.tileset, si);
+      if (mask === 0xFFFFFFFF) {
+        cur = value;
+      } else {
+        cur = (cur & ~mask) | (value & mask);
+      }
+      Assets.setTileFlags(tile.tileset, si, cur);
+    }
+    touch(); renderMap();
+  }
+
   function renderMap() {
     const m = curMap();
     if (!m) return;
@@ -504,6 +756,7 @@ const editorI18n = createEditorI18n({
       if (mode === "pass") drawPassOverlay(g, m);
       if (mode === "height") drawHeightOverlay(g, m);
       if (mode === "collision") drawCollisionOverlay(g, m);
+      if (mode === "flags") drawFlagsOverlay(g, m);
       // events in grid-free mode
       if (mode === "event" || mode === "start") {
         for (const ev of m.events) {
@@ -568,6 +821,7 @@ const editorI18n = createEditorI18n({
     if (mode === "pass") drawPassOverlay(g, m);
     if (mode === "height") drawHeightOverlay(g, m);
     if (mode === "collision") drawCollisionOverlay(g, m);
+    if (mode === "flags") drawFlagsOverlay(g, m);
     // events
     if (mode === "event" || mode === "start") {
       for (const ev of m.events) {
@@ -671,12 +925,58 @@ const editorI18n = createEditorI18n({
     tabBar.appendChild(todayBtn);
     wrap.insertBefore(tabBar, palCanvas);
   }
+  function computeKindPreview(ts) {
+    // Build a compact kind preview palette for autotile tilesets (A1-A5)
+    const kindGrid = []; // {kindIndex, tileIds: [...]}
+    if (!ts || !ts.tileIds) return kindGrid;
+    for (const tid of ts.tileIds) {
+      const tile = Assets.tiles[tid];
+      if (!tile) continue;
+      const ki = tile.kindIndex;
+      if (ki == null) continue;
+      if (!kindGrid[ki]) kindGrid[ki] = { kindIndex: ki, tileIds: [] };
+      kindGrid[ki].tileIds.push(tid);
+    }
+    return kindGrid;
+  }
+  function composeAutotileKindPreview(g, kindGroup, ts, dx, dy) {
+    // Draw a single 48x48 "kind preview" for an autotile group.
+    // Use the fully-surrounded shape (Shape 47 for floor, Shape 15 for wall) if available.
+    const tile = Assets.tiles[kindGroup.tileIds[0]];
+    if (!tile) return;
+    const img = tile.image;
+    const spec = Assets.MZ_TILESET_SPECS ? Assets.MZ_TILESET_SPECS[ts.category] : null;
+    if (!spec || !spec.autotile || !img) {
+      // fallback: just draw the first subtile
+      Assets.drawTile(g, kindGroup.tileIds[0], dx, dy);
+      return;
+    }
+    const kindCol = tile.tilesetX >= 0 ? Math.floor(tile.tilesetX / (spec.kindW || 1)) : 0;
+    const kindRow = tile.tilesetY >= 0 ? Math.floor(tile.tilesetY / (spec.kindH || 1)) : 0;
+    const ox = kindCol * (spec.kindW || 1) * TILE;
+    const oy = kindRow * (spec.kindH || 1) * TILE;
+    // For floor/wall autotiles, compose the "fully surrounded" shape (all neighbors present)
+    if (spec.autotile === "floor") {
+      const composed = Assets.composeFloorAutotile(img, ox / 24, oy / 24, 4, 4, 4, 4);
+      g.drawImage(composed, dx, dy);
+    } else if (spec.autotile === "wall") {
+      const composed = Assets.composeWallAutotile(img, ox / 24, oy / 24, 15);
+      g.drawImage(composed, dx, dy);
+    } else {
+      // animated / group: draw the representative cell
+      const repX = spec.kindW > 1 ? (kindCol * spec.kindW + 1) * TILE : ox;
+      const repY = spec.kindH > 1 ? (kindRow * spec.kindH + 1) * TILE : oy;
+      g.drawImage(img, repX, repY, TILE, TILE, dx, dy, TILE, TILE);
+    }
+  }
   function renderPalette() {
     // build tabs on first call if missing
     const wrap = $("palettewrap");
     if (!wrap.querySelector(".pal-tabs")) rebuildPalTabs();
     // filter tiles based on active tab
     let visibleTiles = [];
+    let paletteKindMode = false; // true when showing autotile kind preview
+    let paletteKindGrid = [];    // kind preview data
     const allTiles = Assets.tiles;
     if (paletteTab === "all") {
       visibleTiles = allTiles.map((t, i) => i).filter(i => t && t.key);
@@ -700,27 +1000,87 @@ const editorI18n = createEditorI18n({
       // specific tileset tab
       const ts = Assets.tilesets[paletteTab];
       if (ts && ts.tileIds) {
-        visibleTiles = ts.tileIds.filter(id => id != null && allTiles[id]);
+        const category = (ts.category || "").toUpperCase();
+        const isAutotile = /^A[1-5]$/.test(category);
+        if (isAutotile && ts.autotile) {
+          // ---- autotile kind preview mode ----
+          paletteKindMode = true;
+          paletteKindGrid = computeKindPreview(ts);
+          visibleTiles = paletteKindGrid.map(g2 => g2.tileIds[0]).filter(id => id != null && allTiles[id]);
+        } else {
+          visibleTiles = ts.tileIds.filter(id => id != null && allTiles[id]);
+        }
       } else {
         visibleTiles = allTiles.map((t, i) => i).filter(i => t && t.key);
       }
     }
-    if (visibleTiles.length === 0) visibleTiles = [0]; // at least show something
-    const cols = Math.max(1, Math.min(Assets.PALETTE_COLS, visibleTiles.length));
+    // For B-E / non-autotile tilesets: expand tiles per tileset column count
+    let cols = Assets.PALETTE_COLS;
+    if (!paletteKindMode && paletteTab !== "all" && paletteTab !== "today") {
+      const ts = Assets.tilesets[paletteTab];
+      if (ts && ts.cols) cols = ts.cols;
+    }
+    if (visibleTiles.length === 0) visibleTiles = [0];
+    cols = Math.max(1, Math.min(cols, visibleTiles.length));
     const rows = Math.ceil(visibleTiles.length / cols);
     palCanvas.width = cols * TILE;
     palCanvas.height = rows * TILE;
     const g = palCanvas.getContext("2d");
+    g.imageSmoothingEnabled = false;
     g.fillStyle = "#15151d";
     g.fillRect(0, 0, palCanvas.width, palCanvas.height);
-    for (let i = 0; i < visibleTiles.length; i++) {
-      const id = visibleTiles[i];
-      const cx = (i % cols) * TILE;
-      const cy = Math.floor(i / cols) * TILE;
-      Assets.drawTile(g, id, cx, cy);
-      if (id === selectedTile) {
-        g.strokeStyle = "#ffd86a"; g.lineWidth = 3;
-        g.strokeRect(cx + 2, cy + 2, TILE - 4, TILE - 4);
+    if (paletteKindMode) {
+      // Draw autotile kind previews
+      const kindCols = Math.max(1, Math.min(cols, paletteKindGrid.length));
+      for (let i = 0; i < paletteKindGrid.length; i++) {
+        const kg = paletteKindGrid[i];
+        if (!kg) continue;
+        const cx = (i % kindCols) * TILE;
+        const cy = Math.floor(i / kindCols) * TILE;
+        const ts2 = Assets.tilesets[paletteTab];
+        composeAutotileKindPreview(g, kg, ts2, cx, cy);
+        // highlight if the kind's first tile is selected
+        const firstId = kg.tileIds[0];
+        if (firstId != null && kg.tileIds.indexOf(selectedTile) >= 0) {
+          g.strokeStyle = "#ffd86a"; g.lineWidth = 3;
+          g.strokeRect(cx + 2, cy + 2, TILE - 4, TILE - 4);
+        }
+        // label with kind index
+        g.fillStyle = "rgba(0,0,0,0.5)";
+        g.fillRect(cx + 1, cy + 1, 14, 11);
+        g.fillStyle = "#fff";
+        g.font = "9px monospace";
+        g.textAlign = "left"; g.textBaseline = "top";
+        g.fillText("K" + kg.kindIndex, cx + 2, cy + 2);
+      }
+    } else {
+      // Normal tile grid
+      for (let i = 0; i < visibleTiles.length; i++) {
+        const id = visibleTiles[i];
+        const cx = (i % cols) * TILE;
+        const cy = Math.floor(i / cols) * TILE;
+        Assets.drawTile(g, id, cx, cy);
+        if (id === selectedTile) {
+          g.strokeStyle = "#ffd86a"; g.lineWidth = 3;
+          g.strokeRect(cx + 2, cy + 2, TILE - 4, TILE - 4);
+        }
+      }
+      // Draw marquee selection rectangle for B-E tilesets
+      if (paletteMarqueeStart && paletteMarqueeEnd) {
+        const ts3 = Assets.tilesets[paletteTab];
+        if (ts3 && !/^A[1-5]$/i.test(ts3.category || "")) {
+          const sc = ts3 ? ts3.cols : Assets.PALETTE_COLS;
+          const x1 = Math.min(paletteMarqueeStart.col, paletteMarqueeEnd.col) * TILE;
+          const y1 = Math.min(paletteMarqueeStart.row, paletteMarqueeEnd.row) * TILE;
+          const x2 = (Math.max(paletteMarqueeStart.col, paletteMarqueeEnd.col) + 1) * TILE;
+          const y2 = (Math.max(paletteMarqueeStart.row, paletteMarqueeEnd.row) + 1) * TILE;
+          g.fillStyle = "rgba(255,216,106,0.12)";
+          g.fillRect(x1, y1, x2 - x1, y2 - y1);
+          g.strokeStyle = "#ffd86a"; g.lineWidth = 2;
+          g.setLineDash([4, 4]);
+          g.strokeRect(x1, y1, x2 - x1, y2 - y1);
+          g.setLineDash([]);
+        }
       }
     }
   }
@@ -804,13 +1164,13 @@ const editorI18n = createEditorI18n({
   }
   function undo() {
     const u = undoStack.pop();
-    if (!u) { flashStatus("Nothing to undo"); return; }
+    if (!u) { flashStatus(t("status.nothing_to_undo")); return; }
     redoStack.push(snapshotOf(u.mapId));
     applySnapshot(u);
   }
   function redo() {
     const r = redoStack.pop();
-    if (!r) { flashStatus("Nothing to redo"); return; }
+    if (!r) { flashStatus(t("status.nothing_to_redo")); return; }
     undoStack.push(snapshotOf(r.mapId));
     applySnapshot(r);
   }
@@ -914,7 +1274,7 @@ const editorI18n = createEditorI18n({
   }
   function copySelection(cut) {
     if (mode === "event") {
-      if (!selectedEvent) { flashStatus("Select an event first (click one in Event mode)"); return; }
+      if (!selectedEvent) { flashStatus(t("status.select_event_first")); return; }
       clipEvent = RA.clone(selectedEvent);
       clipTiles = null;
       if (cut) {
@@ -928,7 +1288,7 @@ const editorI18n = createEditorI18n({
       refreshToolbar();
       return;
     }
-    if (mode !== "map" || !selection) { flashStatus("Shift+drag on the map to select an area first"); return; }
+    if (mode !== "map" || !selection) { flashStatus(t("status.select_area_first")); return; }
     const m = curMap(), r = selection;
     const w = r.x2 - r.x1 + 1, h2 = r.y2 - r.y1 + 1;
     const clip = { w, h: h2, layers: {}, shadows: [], heights: [] };
@@ -967,10 +1327,10 @@ const editorI18n = createEditorI18n({
       if (mode !== "map") setMode("map");
       pasteMode = "tiles";
     } else {
-      flashStatus("Clipboard is empty — Copy or Cut something first");
+      flashStatus(t("status.clipboard_empty"));
       return;
     }
-    flashStatus("Click the map to paste (Esc or right-click cancels)");
+    flashStatus(t("status.paste_cancel_instruction"));
     refreshToolbar(); renderMap();
   }
   function stampPaste(cell) {
@@ -989,7 +1349,7 @@ const editorI18n = createEditorI18n({
       }
       touch(); renderMap();
     } else if (pasteMode === "event" && clipEvent) {
-      if (eventAt(cell.x, cell.y)) { flashStatus("That cell already has an event"); return; }
+      if (eventAt(cell.x, cell.y)) { flashStatus(t("status.cell_has_event")); return; }
       pushUndo();
       const m = curMap();
       const ev = RA.clone(clipEvent);
@@ -1045,7 +1405,7 @@ const editorI18n = createEditorI18n({
       proj.system.startMapId = curMapId;
       proj.system.startX = cell.x; proj.system.startY = cell.y;
       touch(); renderMap();
-      flashStatus("Start position set");
+      flashStatus(t("status.start_pos_set"));
       setMode("event");
       return;
     }
@@ -1064,6 +1424,37 @@ const editorI18n = createEditorI18n({
       if (tool === "rect" || tool === "circle") { rectStart = cell; renderMap(); }
       else if (tool === "fill") { floodFillHeight(cell.x, cell.y, heightVal); touch(); renderMap(); }
       else paintHeight(cell, tool === "erase" ? 0 : heightVal);
+      return;
+    }
+    if (mode === "flags") {
+      pushUndo();
+      painting = true;
+      const cell2 = cell;
+      const tf = Assets;
+      switch (flagsTool) {
+        case "passage": {
+          const cur = flagsOfPlacement(cell2, curMap());
+          const pass = cur & tf.TF_PASS_MASK;
+          const next = pass === tf.TF_PASS_O ? tf.TF_PASS_X : pass === tf.TF_PASS_X ? tf.TF_PASS_STAR : tf.TF_PASS_O;
+          paintFlags(cell2, tf.TF_PASS_MASK, next);
+          break;
+        }
+        case "dir-n": paintFlags(cell2, tf.TF_DIR_N, (flagsOfPlacement(cell2, curMap()) & tf.TF_DIR_N) ? 0 : tf.TF_DIR_N); break;
+        case "dir-s": paintFlags(cell2, tf.TF_DIR_S, (flagsOfPlacement(cell2, curMap()) & tf.TF_DIR_S) ? 0 : tf.TF_DIR_S); break;
+        case "dir-e": paintFlags(cell2, tf.TF_DIR_E, (flagsOfPlacement(cell2, curMap()) & tf.TF_DIR_E) ? 0 : tf.TF_DIR_E); break;
+        case "dir-w": paintFlags(cell2, tf.TF_DIR_W, (flagsOfPlacement(cell2, curMap()) & tf.TF_DIR_W) ? 0 : tf.TF_DIR_W); break;
+        case "ladder":  paintFlags(cell2, tf.TF_LADDER,  (flagsOfPlacement(cell2, curMap()) & tf.TF_LADDER)  ? 0 : tf.TF_LADDER); break;
+        case "bush":    paintFlags(cell2, tf.TF_BUSH,    (flagsOfPlacement(cell2, curMap()) & tf.TF_BUSH)    ? 0 : tf.TF_BUSH); break;
+        case "counter": paintFlags(cell2, tf.TF_COUNTER, (flagsOfPlacement(cell2, curMap()) & tf.TF_COUNTER) ? 0 : tf.TF_COUNTER); break;
+        case "damage":  paintFlags(cell2, tf.TF_DAMAGE,  (flagsOfPlacement(cell2, curMap()) & tf.TF_DAMAGE)  ? 0 : tf.TF_DAMAGE); break;
+        case "terrain": {
+          const cur2 = flagsOfPlacement(cell2, curMap());
+          const tag = (cur2 & tf.TF_TERRAIN_MASK) >> tf.TF_TERRAIN_SHIFT;
+          const next2 = (tag + 1) & 7;
+          paintFlags(cell2, tf.TF_TERRAIN_MASK, next2 << tf.TF_TERRAIN_SHIFT);
+          break;
+        }
+      }
       return;
     }
     if (mode === "collision") {
@@ -1259,6 +1650,23 @@ const editorI18n = createEditorI18n({
       paintShadow(cell, q, shadowSet);
     } else if (mode === "pass" && painting) {
       paintPass(cell, passVal);
+    } else if (mode === "flags" && painting) {
+      const tf = Assets;
+      const cur = flagsOfPlacement(cell, curMap());
+      let mask = tf.TF_PASS_MASK, val = 0;
+      switch (flagsTool) {
+        case "passage": { const pass = cur & tf.TF_PASS_MASK; val = pass === tf.TF_PASS_O ? tf.TF_PASS_X : pass === tf.TF_PASS_X ? tf.TF_PASS_STAR : tf.TF_PASS_O; break; }
+        case "dir-n": mask = tf.TF_DIR_N; val = (cur & tf.TF_DIR_N) ? 0 : tf.TF_DIR_N; break;
+        case "dir-s": mask = tf.TF_DIR_S; val = (cur & tf.TF_DIR_S) ? 0 : tf.TF_DIR_S; break;
+        case "dir-e": mask = tf.TF_DIR_E; val = (cur & tf.TF_DIR_E) ? 0 : tf.TF_DIR_E; break;
+        case "dir-w": mask = tf.TF_DIR_W; val = (cur & tf.TF_DIR_W) ? 0 : tf.TF_DIR_W; break;
+        case "ladder":  mask = tf.TF_LADDER;  val = (cur & tf.TF_LADDER)  ? 0 : tf.TF_LADDER; break;
+        case "bush":    mask = tf.TF_BUSH;    val = (cur & tf.TF_BUSH)    ? 0 : tf.TF_BUSH; break;
+        case "counter": mask = tf.TF_COUNTER; val = (cur & tf.TF_COUNTER) ? 0 : tf.TF_COUNTER; break;
+        case "damage":  mask = tf.TF_DAMAGE;  val = (cur & tf.TF_DAMAGE)  ? 0 : tf.TF_DAMAGE; break;
+        case "terrain": { mask = tf.TF_TERRAIN_MASK; const tag = (cur >> tf.TF_TERRAIN_SHIFT) & 7; val = ((tag + 1) & 7) << tf.TF_TERRAIN_SHIFT; break; }
+      }
+      paintFlags(cell, mask, val);
     } else if (mode === "height" && painting && tool !== "rect" && tool !== "circle" && tool !== "fill") {
       paintHeight(cell, tool === "erase" ? 0 : heightVal);
     } else if (mode === "event" && dragEvent && (dragEvent.x !== cell.x || dragEvent.y !== cell.y)) {
@@ -1338,14 +1746,14 @@ const editorI18n = createEditorI18n({
     const m = curMap();
     let s = m ? m.name + " (" + m.width + "×" + m.height + ")" : "";
     s += "  ·  " + (mode === "map" ? t(TOOL_LABELS[tool]) + " / " + t(LAYER_LABELS[layer])
-      : mode === "event" ? t("Event mode (double-click = new/edit, drag = move)")
-      : mode === "pass" ? t("Passability (click cycles auto → ✕ block → ○ pass)")
-      : mode === "height" ? t("Heights — painting {value} with {tool} (keys 0–9 set the value, right-click picks, Eraser clears)", {
+      : mode === "event" ? t("mode.desc.event")
+      : mode === "pass" ? t("mode.desc.passability")
+      : mode === "height" ? t("mode.desc.height", {
         value: heightVal,
         tool: t(TOOL_LABELS[tool]),
       })
-      : mode === "collision" ? t("Collision — click grid cells to edit per-tile rects, click empty area to create free-form masks (Delete removes selected, Esc deselects)")
-      : t("Click the map to set the start position"));
+      : mode === "collision" ? t("mode.desc.collision")
+      : t("mode.desc.start"));
     if (hoverCell && m) {
       s += "  ·  " + hoverCell.x + "," + hoverCell.y;
       if (mode === "map" && m.gridFree && m.tilePlacements) {
@@ -1368,15 +1776,15 @@ const editorI18n = createEditorI18n({
         s += "  ·  " + ln + ": " + (Assets.tiles[t] ? Assets.tiles[t].name : "?");
       }
       if (mode === "pass") {
-        s += "  ·  " + (effectivePass(hoverCell.x, hoverCell.y) ? "○ " + t("passable") : "✕ " + t("blocked")) +
-          (m.passOv[hoverCell.y * m.width + hoverCell.x] ? " (" + t("override") + ")" : "");
+        s += "  ·  " + (effectivePass(hoverCell.x, hoverCell.y) ? "○ " + t("status.passable") : "✕ " + t("status.blocked")) +
+          (m.passOv[hoverCell.y * m.width + hoverCell.x] ? " (" + t("status.override") + ")" : "");
       }
       const ev = mode !== "map" && eventAt(hoverCell.x, hoverCell.y);
       if (ev) s += "  ·  " + ev.name;
     }
-    if (mode === "map" && selection) s += "  ·  " + t("selection") + " " + (selection.x2 - selection.x1 + 1) + "×" + (selection.y2 - selection.y1 + 1);
+    if (mode === "map" && selection) s += "  ·  " + t("status.selection") + " " + (selection.x2 - selection.x1 + 1) + "×" + (selection.y2 - selection.y1 + 1);
     if (mode === "map") {
-      s += "  ·  " + t("brush") + ": " + (Assets.tiles[selectedTile] ? Assets.tiles[selectedTile].name : "?");
+      s += "  ·  " + t("status.brush") + ": " + (Assets.tiles[selectedTile] ? Assets.tiles[selectedTile].name : "?");
       if (m && m.gridFree) s += "  ·  snap: " + snapMode;
     }
     $("status-text").textContent = s;
@@ -1425,9 +1833,9 @@ const editorI18n = createEditorI18n({
     openMapProps();
   }
   function deleteMap() {
-    if (proj.maps.length <= 1) { alert("A project needs at least one map."); return; }
+    if (proj.maps.length <= 1) { alert(t("status.need_one_map")); return; }
     const m = curMap();
-    confirmBox('Delete map "' + m.name + '"? This cannot be undone.', () => {
+    confirmBox(t("status.confirm_delete_map", { name: m.name }), () => {
       proj.maps = proj.maps.filter((x) => x.id !== m.id);
       curMapId = proj.maps[0].id;
       rebuildMapList(); renderMap(); touch();
@@ -2042,7 +2450,7 @@ const editorI18n = createEditorI18n({
       title: "Map Properties",
       content,
       buttons: [
-        { label: "OK", primary: true, onClick(close) {
+        { label: t("btn.ok"), primary: true, onClick(close) {
           m.name = work.name;
           m.music = work.music;
           m.encounters = { rate: work.rate, troops: encTroops };
@@ -2187,11 +2595,11 @@ const editorI18n = createEditorI18n({
     const asyncRenderer = typeof GLRender !== "undefined" && GLRender.available &&
       GLRender.available.constructor && GLRender.available.constructor.name === "AsyncFunction";
     if (typeof GLRender === "undefined" || asyncRenderer) {
-      flashStatus("HD-2D live preview is being rebuilt on the new PIXI renderer — unavailable for now");
+      flashStatus(t("status.preview_unavailable"));
       return;
     }
     if (!GLRender.available()) {
-      flashStatus("HD-2D preview needs WebGL2, which is unavailable in this browser");
+      flashStatus(t("status.webgl2_required"));
       return;
     }
     hdCanvas = h("canvas", { width: 480, height: 360, style: "display:block;cursor:grab" });
@@ -3016,7 +3424,7 @@ const editorI18n = createEditorI18n({
     }
     function pasteSel() {
       const block = Array.isArray(clipCmd) ? clipCmd : (clipCmd ? [clipCmd] : null);
-      if (!block || !block.length) { flashStatus("Clipboard is empty — copy a command first"); return; }
+      if (!block || !block.length) { flashStatus(t("status.clipboard_empty_command")); return; }
       const target = cur();
       let arr, idx;
       if (target && target.cmd) { arr = target.arr; idx = target.idx + 1; }   // after the focused command
@@ -3422,7 +3830,7 @@ const editorI18n = createEditorI18n({
       h("button", { onclick() {
         if (!cur) return;
         if (spec.allowEmpty !== true && spec.list().length <= 1) { alert("Keep at least one entry."); return; }
-        confirmBox("Delete \"" + cur.name + "\"?", () => {
+        confirmBox(t("status.confirm_delete_entry", { name: cur.name }), () => {
           const arr = spec.list();
           arr.splice(arr.indexOf(cur), 1);
           cur = arr[0] || null;
@@ -4194,7 +4602,7 @@ const editorI18n = createEditorI18n({
     tabs.forEach((t, i) => tabBar.appendChild(h("button", { onclick: () => show(i) }, t.label)));
     const content = h("div", { class: "dbwrap" }, tabBar, body);
     modal({ title: "Database", content, wide: true, class: "db-modal", dismissable: false,
-      buttons: [{ label: "Close", primary: true, onClick(c) { c(); rebuildMapList(); renderMap(); } }] });
+      buttons: [{ label: "btn.close", primary: true, onClick(c) { c(); rebuildMapList(); renderMap(); } }] });
     show(0);
   }
 
@@ -4292,7 +4700,7 @@ atlas.onMapLoad((map) => {
     redrawList(); redrawForm();
     modal({ title: "Plugin Manager", wide: true, dismissable: false,
       content: h("div", { class: "plug-wrap" }, side, form),
-      buttons: [{ label: "Close", primary: true }] });
+      buttons: [{ label: "btn.close", primary: true }] });
   }
 
   // ============================ audio manager ============================
@@ -4562,7 +4970,7 @@ atlas.onMapLoad((map) => {
       }
       touch();
       redrawList(); redrawForm();
-      flashStatus("Character saved — pick it as a sprite for actors and events");
+      flashStatus(t("status.char_saved"));
     }
     function redrawList() {
       listEl.innerHTML = "";
@@ -4591,11 +4999,11 @@ atlas.onMapLoad((map) => {
     );
     redrawList(); redrawForm(); redrawPreview();
     modal({
-      title: "Character Generator",
+      title: "dialog.char_generator",
       wide: true,
       dismissable: false,
       content: h("div", { class: "cg-wrap" }, side, formBox),
-      buttons: [{ label: "Close", primary: true }],
+      buttons: [{ label: "btn.close", primary: true }],
       onClose() {
         clearInterval(animTimer);
         Assets.removeCharset(PV_KEY);
@@ -4612,9 +5020,9 @@ atlas.onMapLoad((map) => {
     refreshToolbar();
     setStatus();
     const saveIndicator = $("save-ind");
-    if (saveIndicator.textContent.startsWith("●")) saveIndicator.textContent = "● " + t("unsaved");
-    else if (saveIndicator.textContent.startsWith("⚠")) saveIndicator.textContent = "⚠ " + t("save failed");
-    else saveIndicator.textContent = "✓ " + t("saved");
+    if (saveIndicator.textContent.startsWith("●")) saveIndicator.textContent = "● " + t("status.unsaved");
+    else if (saveIndicator.textContent.startsWith("⚠")) saveIndicator.textContent = "⚠ " + t("status.save_failed");
+    else saveIndicator.textContent = "✓ " + t("status.saved");
   }
   function openLanguageSettings() {
     let selectedLocale = editorI18n.locale;
@@ -4623,17 +5031,17 @@ atlas.onMapLoad((map) => {
     }, ...editorI18n.locales().map((locale) =>
       h("option", { value: locale.id, ...(locale.id === selectedLocale ? { selected: "" } : {}) }, locale.label)));
     modal({
-      title: "Interface Language",
+      title: "dialog.interface_language",
       content: h("div", null,
-        h("p", null, t("Choose the language used by the editor. Project content is not translated.")),
-        field("Language", languageSelect)),
+        h("p", null, t("lang.choose")),
+        field("label.language", languageSelect)),
       buttons: [
-        { label: "Apply", primary: true, onClick(close) {
+        { label: "btn.apply", primary: true, onClick(close) {
           editorI18n.setLocale(selectedLocale);
           close();
           refreshLocalizedChrome();
         } },
-        { label: "Cancel" },
+        { label: "btn.cancel" },
       ],
     });
   }
@@ -4751,6 +5159,7 @@ atlas.onMapLoad((map) => {
     height: svgIcon('<path d="M3 16.5h4v-4h4v-4h4v-5"/><path d="M12.5 6 15 3.5 17.5 6"/>'),
     hd2d: svgIcon('<path d="M2.5 14.5l5-8 4 6 2-3 4 5"/><path d="M2.5 17h15"/>'),
     collision: svgIcon('<path d="M10 2.5l7.2 4.2v8.3L10 19.5l-7.2-4.5V6.7z"/><path d="M10 6.5v6.5M6.8 9.8H13.2"/>'),
+    flags: svgIcon('<rect x="3" y="3" width="14" height="14" rx="1.5"/><path d="M7.5 6v12M12.5 6v12M6 9h9M6 15h9"/>'),
     zoomin: svgIcon('<circle cx="8.8" cy="8.8" r="5.6"/><path d="M13 13l4.3 4.3"/><path d="M6.3 8.8h5M8.8 6.3v5"/>'),
     zoomout: svgIcon('<circle cx="8.8" cy="8.8" r="5.6"/><path d="M13 13l4.3 4.3"/><path d="M6.3 8.8h5"/>'),
     zoom1: svgIcon('<circle cx="8.8" cy="8.8" r="5.6"/><path d="M13 13l4.3 4.3"/><text x="8.8" y="10.9" font-size="5.6" font-weight="bold" text-anchor="middle" fill="currentColor" stroke="none" font-family="monospace">1:1</text>'),
@@ -4784,25 +5193,35 @@ atlas.onMapLoad((map) => {
     refreshToolbar();
   }
 
-  act("new", { label: "New Project…", icon: "new", tip: "New project (resets to the bundled sample game)", run() {
-    confirmBox("Start a fresh project (the bundled sample game)? Your current project will be replaced — Export first if you want to keep it.", () => {
-      proj = DataDefaults.newProject();
-      Assets.registerCustomChars(proj.customChars);
-      Assets.bindExternalAssets(proj);
-      curMapId = proj.maps[0].id;
-      selectedEvent = null; selection = null; pasteMode = null;
-      undoStack.length = 0; redoStack.length = 0;
-      rebuildAll(); touch();
-    });
+  act("new", { label: "action.new_project", icon: "new", tip: "tip.new_project", run() {
+    if (host.isTauri) {
+      openNewProjectDialog();
+    } else {
+      confirmBox(t("dialog.confirm_new_project"), () => {
+        proj = DataDefaults.newProject();
+        Assets.registerCustomChars(proj.customChars);
+        Assets.bindExternalAssets(proj);
+        curMapId = proj.maps[0].id;
+        selectedEvent = null; selection = null; pasteMode = null;
+        undoStack.length = 0; redoStack.length = 0;
+        rebuildAll(); touch();
+      });
+    }
   } });
-  act("open", { label: "Open Project (.json)…", icon: "open", tip: "Open / import a project file", run() { $("import-file").click(); } });
-  act("save", { label: "Save Project", icon: "save", key: "Ctrl+S",
-    tip: host.isTauri ? "Save the project to its file (Ctrl+S)" : "Save the project to this browser now",
+  act("open", { label: "action.open_project", icon: "open", tip: "tip.open_project", run() { $("import-file").click(); } });
+  act("open-folder", { label: "action.open_project_folder", icon: "open", tip: "tip.open_project_folder", run() {
+    openProjectFolderFlow();
+  } });
+  act("save", { label: "action.save_project", icon: "save", key: "Ctrl+S",
+    tip: host.isTauri ? "tip.save_project_tauri" : "tip.save_project_browser",
     run() {
       if (host.isTauri) { desktopSave(false); return; }
       saveNow();
-      flashStatus("Project saved to this browser — use File ▸ Export for a backup file");
+      flashStatus(t("status.project_saved_browser"));
     } });
+  act("save-folder", { label: "action.save_project_folder", icon: "save", tip: "tip.save_project_folder", run() {
+    saveProjectFolderFlow();
+  } });
   act("export", { label: "Export Project As File…", run: exportProject });
   act("build", { label: "Export Standalone Game…", run: openStandaloneExport });
   act("play", { label: "Playtest", icon: "play", tip: "Save and run the game", run() {
@@ -4832,8 +5251,10 @@ atlas.onMapLoad((map) => {
   act("mode-collision", { label: "Collision Mode", icon: "collision", tip: "Collision — edit per-tile and free-form collision masks", active: () => mode === "collision", run: () => setMode("collision") });
   act("mode-start", { label: "Set Start Position…", active: () => mode === "start", run() {
     setMode("start");
-    flashStatus("Click the map to set the player start position");
+    flashStatus(t("status.set_start_pos"));
   } });
+  act("mode-flags", { label: "Tile Flags Mode", icon: "flags", tip: "Tile Flags — paint passage, directional, and terrain property flags",
+    active: () => mode === "flags", run: () => setMode("flags") });
 
   [["auto", "0"], ["ground", "1"], ["decor", "2"], ["decor2", "3"], ["over", "4"]].forEach(([ln, key]) => {
     act("layer-" + ln, { label: LAYER_LABELS[ln], icon: "layer-" + ln, key,
@@ -4845,6 +5266,39 @@ atlas.onMapLoad((map) => {
       tip: t === "shadow" ? "Shadow Pen — left paints a shadow quadrant, right erases" : TOOL_LABELS[t],
       active: () => tool === t && (mode === "map" || mode === "height"),
       run() { if (mode !== "map" && mode !== "height") setMode("map"); setTool(t); } });
+  });
+
+  // ---- flags sub-tools ----
+  const FLAG_TOOLS = [
+    ["passage", "Flags: Passage", "flag-pass"],
+    ["dir-n", "Flags: Block N", "flag-dirn"],
+    ["dir-s", "Flags: Block S", "flag-dirs"],
+    ["dir-e", "Flags: Block E", "flag-dire"],
+    ["dir-w", "Flags: Block W", "flag-dirw"],
+    ["ladder", "Flags: Ladder", "flag-ladder"],
+    ["bush", "Flags: Bush", "flag-bush"],
+    ["counter", "Flags: Counter", "flag-counter"],
+    ["damage", "Flags: Damage", "flag-damage"],
+    ["terrain", "Flags: Terrain Tag", "flag-terrain"],
+  ];
+  const FLAG_ICONS = {
+    "flag-pass": svgIcon('<text x="8" y="15" font-size="12" font-weight="bold" text-anchor="middle" fill="currentColor" stroke="none">P</text>'),
+    "flag-dirn": svgIcon('<path d="M8 14l4-8 4 8"/>'),
+    "flag-dirs": svgIcon('<path d="M8 6l4 8 4-8"/>'),
+    "flag-dire": svgIcon('<path d="M6 8l8 4-8 4"/>'),
+    "flag-dirw": svgIcon('<path d="M14 8l-8 4 8 4"/>'),
+    "flag-ladder": svgIcon('<rect x="7" y="3" width="6" height="14" rx="1"/><path d="M7 7h6M7 10h6M7 13h6"/>'),
+    "flag-bush": svgIcon('<path d="M10 10l-4 6h8z" fill="currentColor" stroke="none"/><path d="M6 10q4-6 8 0"/>'),
+    "flag-counter": svgIcon('<rect x="4" y="8" width="12" height="8"/><rect x="4" y="8" width="12" height="3"/>'),
+    "flag-damage": svgIcon('<path d="M10 4v12M4 10h12"/>'),
+    "flag-terrain": svgIcon('<text x="8" y="15" font-size="10" font-weight="bold" text-anchor="middle" fill="currentColor" stroke="none">T</text>'),
+  };
+  FLAG_TOOLS.forEach(([ft, label, iconKey]) => {
+    ICONS[iconKey] = FLAG_ICONS[iconKey];
+    act("flags-" + ft, { label, icon: iconKey,
+      active: () => mode === "flags" && flagsTool === ft,
+      enabled: () => mode === "flags",
+      run() { if (mode !== "flags") setMode("flags"); flagsTool = ft; renderMap(); refreshToolbar(); setStatus(); } });
   });
 
   act("zoomin", { label: "Zoom In", icon: "zoomin", key: "+", run: () => zoomStep(1) });
@@ -4875,10 +5329,11 @@ atlas.onMapLoad((map) => {
     ["new", "open", "save"],
     ["cut", "copy", "paste"],
     ["undo", "redo"],
-    ["mode-map", "mode-event", "mode-pass", "mode-height", "mode-collision"],
+    ["mode-map", "mode-event", "mode-pass", "mode-height", "mode-collision", "mode-flags"],
     ["layer-auto", "layer-ground", "layer-decor", "layer-decor2", "layer-over"],
     ["tool-pen", "tool-erase", "tool-rect", "tool-circle", "tool-fill", "tool-shadow"],
     ["zoomin", "zoomout", "zoom1", "snap-toggle"],
+    ["flags-passage", "flags-dir-n", "flags-dir-s", "flags-dir-e", "flags-dir-w", "flags-ladder", "flags-bush", "flags-counter", "flags-damage", "flags-terrain"],
     ["db", "plugins", "audio", "search", "resources", "chargen"],
     ["hdpreview", "play"],
   ];
@@ -4911,9 +5366,9 @@ atlas.onMapLoad((map) => {
   }
 
   const MENUS = [
-    { label: "File", items: ["new", "open", "save", "export", "build", "-", "play"] },
+    { label: "File", items: ["new", "open", "open-folder", "save", "save-folder", "-", "export", "build", "-", "play"] },
     { label: "Edit", items: ["undo", "redo", "-", "cut", "copy", "paste", "-", "deselect"] },
-    { label: "Mode", items: ["mode-map", "mode-event", "mode-pass", "mode-height", "mode-collision", "-", "mode-start"] },
+    { label: "Mode", items: ["mode-map", "mode-event", "mode-pass", "mode-height", "mode-collision", "mode-flags", "-", "mode-start"] },
     { label: "Draw", items: ["tool-pen", "tool-erase", "tool-rect", "tool-circle", "tool-fill", "tool-shadow", "-", "snap-toggle"] },
     { label: "Layer", items: ["layer-auto", "layer-ground", "layer-decor", "layer-decor2", "layer-over"] },
     { label: "Scale", items: ["zoomin", "zoomout", "zoom1", "zoomfit"] },
@@ -5028,6 +5483,12 @@ atlas.onMapLoad((map) => {
   }
 
   async function boot() {
+    // Restore last project folder path for desktop app
+    try {
+      const storedFolder = localStorage.getItem("rpgatlas_project_folder");
+      if (storedFolder) currentProjectFolderPath = storedFolder;
+    } catch (e) { /* ignore */ }
+
     proj = loadStored() || DataDefaults.newProject();
     Assets.registerCustomChars(proj.customChars);
     await Promise.all([Assets.loadIconSet(), Assets.loadExternalAssets(proj)]);
@@ -5042,11 +5503,36 @@ atlas.onMapLoad((map) => {
     // palette
     palCanvas.addEventListener("mousedown", (e) => {
       const r = palCanvas.getBoundingClientRect();
-      const x = Math.floor((e.clientX - r.left) / TILE), y = Math.floor((e.clientY - r.top) / TILE);
+      const px = Math.floor((e.clientX - r.left) / TILE), py = Math.floor((e.clientY - r.top) / TILE);
       const cols = palCanvas.width / TILE;
-      const idx = y * cols + x;
-      // find the actual tile id from the filtered palette
+      const idx = py * cols + px;
       const allTiles = Assets.tiles;
+      const ts = Assets.tilesets[paletteTab];
+      const category = ts ? (ts.category || "").toUpperCase() : "";
+      const isAutotile = /^A[1-5]$/.test(category);
+      if (isAutotile && ts && ts.autotile) {
+        // ---- autotile kind preview: select all tiles of this kind ----
+        const kg = computeKindPreview(ts);
+        const kindCols = Math.max(1, Math.min(cols, kg.length));
+        const ki = py * kindCols + px;
+        const kindGroup = kg[ki];
+        if (kindGroup && kindGroup.tileIds.length) {
+          selectedTile = kindGroup.tileIds[0];
+          paletteMarqueeTiles = [];
+          paletteMarqueeStart = null;
+          paletteMarqueeEnd = null;
+          renderPalette(); setStatus();
+        }
+        return;
+      }
+      if (ts && !isAutotile && ts.cols > 1) {
+        // ---- B-E single-tile tileset: marquee selection ----
+        paletteMarqueeStart = { row: py, col: px };
+        paletteMarqueeEnd = null;
+        paletteMarqueeTiles = [];
+        return;
+      }
+      // ---- standard single-click selection ----
       let visibleTiles = [];
       if (paletteTab === "all") {
         visibleTiles = allTiles.map((t, i) => i).filter(i => t && t.key);
@@ -5067,7 +5553,6 @@ atlas.onMapLoad((map) => {
         }
         visibleTiles = allTiles.map((t, i) => i).filter(i => t && usedIds.has(i));
       } else {
-        const ts = Assets.tilesets[paletteTab];
         if (ts && ts.tileIds) {
           visibleTiles = ts.tileIds.filter(id => id != null && allTiles[id]);
         } else {
@@ -5078,13 +5563,47 @@ atlas.onMapLoad((map) => {
       const id = visibleTiles[idx];
       if (id != null && Assets.tiles[id]) { selectedTile = id; renderPalette(); setStatus(); }
     });
+    // Mouse up on palette (for B-E marquee completion)
+    palCanvas.addEventListener("mouseup", () => {
+      if (paletteMarqueeStart && paletteMarqueeEnd) {
+        const ts2 = Assets.tilesets[paletteTab];
+        if (ts2 && ts2.tileIds && !/^A[1-5]$/i.test(ts2.category || "")) {
+          const sc = ts2.cols || Assets.PALETTE_COLS;
+          const c1 = Math.min(paletteMarqueeStart.col, paletteMarqueeEnd.col);
+          const c2 = Math.max(paletteMarqueeStart.col, paletteMarqueeEnd.col);
+          const r1 = Math.min(paletteMarqueeStart.row, paletteMarqueeEnd.row);
+          const r2 = Math.max(paletteMarqueeStart.row, paletteMarqueeEnd.row);
+          paletteMarqueeTiles = [];
+          for (let ry = r1; ry <= r2; ry++) {
+            for (let rx = c1; rx <= c2; rx++) {
+              const i = ry * sc + rx;
+              const tid = ts2.tileIds[i];
+              if (tid != null && Assets.tiles[tid]) paletteMarqueeTiles.push(tid);
+            }
+          }
+          if (paletteMarqueeTiles.length) {
+            selectedTile = paletteMarqueeTiles[0];
+          }
+        }
+        renderPalette(); setStatus();
+      }
+      paletteMarqueeStart = null;
+      paletteMarqueeEnd = null;
+    });
     palCanvas.addEventListener("mousemove", (e) => {
       const r = palCanvas.getBoundingClientRect();
-      const x = Math.floor((e.clientX - r.left) / TILE), y = Math.floor((e.clientY - r.top) / TILE);
+      const px = Math.floor((e.clientX - r.left) / TILE), py = Math.floor((e.clientY - r.top) / TILE);
       const cols = palCanvas.width / TILE;
-      const idx = y * cols + x;
-      // find tile name from filtered palette
+      const idx = py * cols + px;
       const allTiles = Assets.tiles;
+      const ts = Assets.tilesets[paletteTab];
+      // Handle B-E marquee drag
+      if (paletteMarqueeStart && ts && ts.cols > 1 && !/^A[1-5]$/i.test(ts.category || "")) {
+        paletteMarqueeEnd = { row: py, col: px };
+        renderPalette();
+        return;
+      }
+      // find tile name from filtered palette for tooltip
       let visibleTiles = [];
       if (paletteTab === "all") {
         visibleTiles = allTiles.map((t, i) => i).filter(i => t && t.key);
@@ -5105,7 +5624,6 @@ atlas.onMapLoad((map) => {
         }
         visibleTiles = allTiles.map((t, i) => i).filter(i => t && usedIds.has(i));
       } else {
-        const ts = Assets.tilesets[paletteTab];
         if (ts && ts.tileIds) {
           visibleTiles = ts.tileIds.filter(id => id != null && allTiles[id]);
         } else {
@@ -5114,7 +5632,8 @@ atlas.onMapLoad((map) => {
       }
       if (visibleTiles.length === 0) visibleTiles = [0];
       const id = visibleTiles[idx];
-      palCanvas.title = (id != null && Assets.tiles[id]) ? Assets.tiles[id].name : "";
+      if (id != null && Assets.tiles[id]) palCanvas.title = Assets.tiles[id].name;
+      else palCanvas.title = "";
     });
 
     // map canvas
@@ -5177,6 +5696,7 @@ atlas.onMapLoad((map) => {
         case "KeyF": runAct("tool-fill"); break;
         case "KeyS": runAct("tool-shadow"); break;
         case "KeyC": runAct("mode-collision"); break;
+        case "KeyG": runAct("mode-flags"); break;
         case "KeyH": runAct("mode-height"); break;
         case "Digit0": runAct("layer-auto"); break;
         case "Digit1": runAct("layer-ground"); break;

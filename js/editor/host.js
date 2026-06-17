@@ -48,3 +48,46 @@ export async function openProjectFromFile() {
   const json = await invoke("open_project");
   return json ? JSON.parse(json) : null;
 }
+
+// ============================ Project Folder API ============================
+
+/**
+ * Pick a folder using a native folder dialog.
+ * Resolves to the chosen folder path, or null if the user cancelled.
+ */
+export async function pickFolder() {
+  return invoke("pick_folder");
+}
+
+/**
+ * Create a new project folder by copying the RTP template and injecting
+ * metadata. Returns the created project path.
+ */
+export async function createProject(projectName, gameTitle, destinationDir) {
+  return invoke("create_project_folder", { projectName, gameTitle, destinationDir });
+}
+
+/**
+ * Load a project from a folder path. Reads all data/*.json files and
+ * assembles them into a single project object.
+ */
+export async function loadProjectFromFolder(path) {
+  const json = await invoke("load_project_folder", { path });
+  return json ? JSON.parse(json) : null;
+}
+
+/**
+ * Save a project to a folder path. Splits the project into individual
+ * data/*.json files.
+ */
+export async function saveProjectToFolder(path, project) {
+  const projectJson = JSON.stringify(project);
+  return invoke("save_project_folder", { path, projectJson });
+}
+
+/**
+ * Get the engine's template directory path.
+ */
+export async function getEngineTemplatePath() {
+  return invoke("get_engine_template_path");
+}

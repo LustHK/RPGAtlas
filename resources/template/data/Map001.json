@@ -1,0 +1,32 @@
+{
+  "id": 1,
+  "name": "MAP0001",
+  "width": 20,
+  "height": 15,
+  "gridFree": true,
+  "music": "field",
+  "encounters": {
+    "troops": [],
+    "rate": 0
+  },
+  "layers": {
+    "ground": [],
+    "decor": [],
+    "decor2": [],
+    "over": []
+  },
+  "shadows": [],
+  "passOv": [],
+  "heights": [],
+  "collision": {
+    "tiles": [],
+    "masks": []
+  },
+  "tilePlacements": {
+    "ground": [],
+    "decor": [],
+    "decor2": [],
+    "over": []
+  },
+  "events": []
+}
