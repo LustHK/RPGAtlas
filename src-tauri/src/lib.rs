@@ -420,6 +420,38 @@ fn open_playtest(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// List entries in a directory.
+#[tauri::command]
+fn list_directory(path: String) -> Result<Vec<String>, String> {
+    let entries = fs::read_dir(&path).map_err(|e| e.to_string())?;
+    let mut names = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        names.push(entry.file_name().to_string_lossy().to_string());
+    }
+    Ok(names)
+}
+
+/// Read a text file from disk.
+#[tauri::command]
+fn read_text_file(path: String) -> Result<String, String> {
+    fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+/// Write a text file to disk.
+#[tauri::command]
+fn write_text_file(path: String, contents: String) -> Result<(), String> {
+    fs::write(&path, contents).map_err(|e| e.to_string())
+}
+
+/// Read a binary file and return it as a base64-encoded string.
+#[tauri::command]
+fn read_file_base64(path: String) -> Result<String, String> {
+    use base64::Engine;
+    let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -434,6 +466,10 @@ pub fn run() {
             load_project_folder,
             save_project_folder,
             open_playtest,
+            list_directory,
+            read_text_file,
+            write_text_file,
+            read_file_base64,
         ])
         .run(tauri::generate_context!())
         .expect("error while running RPGAtlas");

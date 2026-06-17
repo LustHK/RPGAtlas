@@ -31,7 +31,7 @@ const editorI18n = await createEditorI18n({
 });
 
 (() => {
-  const t = editorI18n.t;
+  const t = editorI18n.t.bind(editorI18n);
   const TILE = Assets.TILE;
   const LAYER_ORDER = ["ground", "decor", "decor2", "over"];
   const LAYER_LABELS = {
@@ -102,16 +102,7 @@ const editorI18n = await createEditorI18n({
   let clipCmd = null; // event-command clipboard (array of cloned commands) — shared across event editors
   let clipPage = null; // event-page clipboard (cloned page) — shared across event editors
   let pasteMode = null; // null | "tiles" | "event"
-  // ---- Phase 4 — grid-free editor state ----
-  // ---- grid-free editor state ----
   let paletteTab = "all"; // "all" | tileset key (e.g. "TileA2") | "today"
-  let snapMode = "free"; // "48" | "24" | "free"
-  let selectedPlacement = null; // {placement, layer} or null
-  let dragPlacement = false; // dragging a placed tile in map mode
-  let dragPlacementObj = null; // ref to the placement being dragged
-  let dragPlacementLayer = null; // layer of the placement being dragged
-  let dragPlacementOffset = null; // {dx, dy} from mouse to placement origin
-  let dragPlacementPushed = false; // undo snapshot taken for the current drag
 
   // ---- tile flags mode state ----
   let flagsTool = "passage"; // passage | dir-n | dir-s | dir-e | dir-w | ladder | bush | counter | damage | terrain
@@ -178,6 +169,19 @@ const editorI18n = await createEditorI18n({
       class: cls || "",
       oninput(e) {
         obj[key] = e.target.value;
+        touch();
+      },
+    });
+  }
+  function i18nIn(obj, key, i18nKey, cls) {
+    return h("input", {
+      type: "text",
+      value: window.t(i18nKey) || obj[key] || "",
+      class: cls || "",
+      oninput(e) {
+        const val = e.target.value;
+        obj[key] = val;
+        window.RPGAtlasI18n.instance.setTranslation(i18nKey, val);
         touch();
       },
     });
@@ -476,6 +480,25 @@ const editorI18n = await createEditorI18n({
     } // Export = Save As on desktop
     exportProjectFile(proj);
   }
+  function exportProjectForPlaytest() {
+    return {
+      actors: proj.actors || [],
+      classes: proj.classes || [],
+      skills: proj.skills || [],
+      items: proj.items || [],
+      weapons: proj.weapons || [],
+      armors: proj.armors || [],
+      enemies: proj.enemies || [],
+      troops: proj.troops || [],
+      states: proj.states || [],
+      animations: proj.animations || [],
+      tilesets: proj.tilesets || [],
+      commonEvents: proj.commonEvents || [],
+      system: proj.system || {},
+      mapInfos: (proj.maps || []).map(function(m) { return { id: m.id, name: m.name, expanded: m.expanded, scrollX: m.scrollX, scrollY: m.scrollY }; }),
+      plugins: proj.plugins || [],
+    };
+  }
   function openStandaloneExport() {
     const content = h(
       "div",
@@ -560,12 +583,55 @@ const editorI18n = await createEditorI18n({
   // ============================ project folder management ============================
   let currentProjectFolderPath = null;
 
-  function setProjectFolderPath(path) {
+  async function syncDatabaseToLocales() {
+    const i18n = window.RPGAtlasI18n.instance;
+    const entities = [
+      { list: proj.actors, prefix: "db.actors" },
+      { list: proj.classes, prefix: "db.classes" },
+      { list: proj.skills, prefix: "db.skills" },
+      { list: proj.items, prefix: "db.items" },
+      { list: proj.weapons, prefix: "db.weapons" },
+      { list: proj.armors, prefix: "db.armors" },
+      { list: proj.enemies, prefix: "db.enemies" },
+      { list: proj.troops, prefix: "db.troops" },
+      { list: proj.states, prefix: "db.states" },
+    ];
+
+    let changesMade = false;
+
+    entities.forEach((ent) => {
+      ent.list.forEach((item) => {
+        const key = `${ent.prefix}.${item.id}.name`;
+        // Check if key exists in either game translations or fallback
+        if (
+          !i18n.resolveKey(i18n.gameTranslations, key) &&
+          !i18n.resolveKey(i18n.gameFallback, key)
+        ) {
+          // Use current database value as default
+          i18n.setTranslation(key, item.name);
+          changesMade = true;
+        }
+      });
+    });
+
+    if (changesMade) {
+      await i18n.saveGameLocale();
+      console.log("i18n: Database synchronized with locales.");
+    }
+  }
+
+  async function setProjectFolderPath(path) {
     currentProjectFolderPath = path;
     try {
       localStorage.setItem("rpgatlas_project_folder", path || "");
     } catch (e) {
       /* ignore */
+    }
+    if (path) {
+      await window.RPGAtlasI18n.instance.loadProjectLocales(path);
+      await syncDatabaseToLocales();
+      // Rebuild the UI to apply translations
+      if (typeof rebuildAll === "function") rebuildAll();
     }
   }
 
@@ -682,7 +748,7 @@ const editorI18n = await createEditorI18n({
             const projName = nameInput.value.trim();
             const gameTitle = titleInput.value.trim() || projName;
             if (!projName) {
-              alert("Please enter a project name.");
+              alert(t("alert.enter_name"));
               return;
             }
 
@@ -691,7 +757,7 @@ const editorI18n = await createEditorI18n({
 
             if (host.isTauri) {
               if (!selectedDest) {
-                alert("Please select a destination folder.");
+                alert(t("alert.select_folder"));
                 flashStatus(t("status.ready"));
                 return;
               }
@@ -794,6 +860,21 @@ const editorI18n = await createEditorI18n({
       else flashStatus("Save to folder failed.");
     }
   }
+
+  // ============================ i18n persistence ===========================
+  window.addEventListener("rpgatlas-save-locale", async (e) => {
+    const { path, data } = e.detail;
+    if (host.isTauri) {
+      try {
+        await host.saveProjectToPath(path, JSON.stringify(data, null, 2));
+      } catch (err) {
+        console.error("Failed to save locale via host:", err);
+      }
+    } else {
+      // On web, we could send to a dev server if available
+      console.warn("Locale saving not supported in browser-only mode.");
+    }
+  });
 
   // ============================ map rendering ============================
   let mapCanvas, mapCtx;
@@ -967,31 +1048,32 @@ const editorI18n = await createEditorI18n({
   // to the legacy RPGAtlas TF_* format so existing overlay code works.
   function rmmvToLegacyFlag(rmmv) {
     var out = 0;
-    // RMMV terrain tag 0x0F = star passage
-    if ((rmmv & 0x000F) === 0x0F) { out |= Assets.TF_PASS_STAR; }
-    else if (rmmv & RMMV_FLAGS.AUTOTILE_ANIM) { /* 0 = passable */ }
-    else if (rmmv & (RMMV_FLAGS.PASS_DOWN | RMMV_FLAGS.PASS_LEFT | RMMV_FLAGS.PASS_RIGHT | RMMV_FLAGS.PASS_UP)) {
+    // Star passage (bit 4)
+    if (rmmv & RMMV_FLAGS.STAR) {
+      out |= Assets.TF_PASS_STAR;
+    } else if (rmmv & RMMV_FLAGS.DIR_MASK) {
       out |= Assets.TF_PASS_X;
     }
-    // Directional blockers
-    if (rmmv & RMMV_FLAGS.PASS_UP)    out |= Assets.TF_DIR_N;
-    if (rmmv & RMMV_FLAGS.PASS_DOWN)  out |= Assets.TF_DIR_S;
-    if (rmmv & RMMV_FLAGS.PASS_RIGHT) out |= Assets.TF_DIR_E;
-    if (rmmv & RMMV_FLAGS.PASS_LEFT)  out |= Assets.TF_DIR_W;
+    // Directional blockers — RMMV dirs→legacy dirs
+    if (rmmv & RMMV_FLAGS.DIR_UP)    out |= Assets.TF_DIR_N;
+    if (rmmv & RMMV_FLAGS.DIR_DOWN)  out |= Assets.TF_DIR_S;
+    if (rmmv & RMMV_FLAGS.DIR_RIGHT) out |= Assets.TF_DIR_E;
+    if (rmmv & RMMV_FLAGS.DIR_LEFT)  out |= Assets.TF_DIR_W;
     // Special flags
     if (rmmv & RMMV_FLAGS.LADDER)  out |= Assets.TF_LADDER;
     if (rmmv & RMMV_FLAGS.BUSH)    out |= Assets.TF_BUSH;
     if (rmmv & RMMV_FLAGS.COUNTER) out |= Assets.TF_COUNTER;
-    // Terrain tag (low 4 bits, shifted to legacy position)
-    var tag = rmmv & RMMV_FLAGS.TERRAIN_TAG_MASK;
-    if (tag && (tag !== 0x0F)) { out |= (tag << Assets.TF_TERRAIN_SHIFT); }
+    if (rmmv & RMMV_FLAGS.DAMAGE)  out |= Assets.TF_DAMAGE;
+    // Terrain tag (bits 12-15, shifted to legacy position)
+    var tag = (rmmv >> RMMV_FLAGS.TERRAIN_TAG_SHIFT) & 0x0F;
+    if (tag) { out |= (tag << Assets.TF_TERRAIN_SHIFT); }
     return out;
   }
 
   function flagsOfTile(tileId) {
-    if (!tileId) return 0;
-    // RMMV tile IDs (>=2048): look up from project tileset flags
-    if (tileId >= 2048 && typeof Assets.getRmmvTileFlags === "function") {
+    if (!tileId && tileId !== 0) return 0;
+    // RMMV: look up from project tileset flags (handles all IDs 0-8191)
+    if (typeof Assets.getRmmvTileFlags === "function" && proj && Array.isArray(proj.tilesets)) {
       var v = Assets.getRmmvTileFlags(tileId);
       if (v != null) return rmmvToLegacyFlag(v);
     }
@@ -1003,13 +1085,6 @@ const editorI18n = await createEditorI18n({
     return Assets.getTileFlags(tile.tileset, si);
   }
   function flagsOfPlacement(cell, m) {
-    if (m.gridFree && m.tilePlacements) {
-      const px = (cell.x + 0.5) * TILE;
-      const py = (cell.y + 0.5) * TILE;
-      const hit = placementAt(px, py);
-      if (hit) return flagsOfTile(hit.placement.tileId);
-      return 0;
-    }
     const ln = layer === "auto" ? topLayerAt(cell.x, cell.y) : layer;
     const tid =
       getCell(cell.x, cell.y, ln) || getCell(cell.x, cell.y, "ground");
@@ -1105,13 +1180,13 @@ const editorI18n = await createEditorI18n({
     const li = LAYER_ORDER.indexOf(ln);
     const tid = mapTileId(m, cell.x, cell.y, li) || mapTileId(m, cell.x, cell.y, 0);
     // RMMV tiles: write directly to project tileset flags
-    if (tid >= 2048 && typeof Assets.setRmmvTileFlags === "function") {
-      var cur = Assets.getRmmvTileFlags(tid);
+    if (typeof Assets.setRmmvTileFlags === "function" && proj && Array.isArray(proj.tilesets)) {
+      let cur = Assets.getRmmvTileFlags(tid);
       if (cur == null) { touch(); renderMap(); return; }
       if (mask === 0xffffffff) {
         cur = value;
       } else {
-        var conv = legacyMaskToRmmv(mask, value, cur);
+        const conv = legacyMaskToRmmv(mask, value, cur);
         cur = (cur & ~conv.mask) | (conv.value & conv.mask);
       }
       Assets.setRmmvTileFlags(tid, cur);
@@ -1141,40 +1216,40 @@ const editorI18n = await createEditorI18n({
     if (!curRmmv) curRmmv = 0;
     var m = 0;
     var v = 0;
-    // Passage mask (0x0003): special handling for O/X/★ → RMMV pass/dir bits
+    // Passage mask (0x0003): handle O/X/★
     if (legacyMask & Assets.TF_PASS_MASK) {
       var passVal = legacyVal & Assets.TF_PASS_MASK;
-      // Preserve existing direction blockers, only update passage semantics
-      var curDirs = curRmmv & RMMV_FLAGS.PASS_DIR_MASK;
+      var PASS_CHUNK = RMMV_FLAGS.DIR_MASK | RMMV_FLAGS.TERRAIN_TAG_MASK | RMMV_FLAGS.STAR;
       if (passVal === Assets.TF_PASS_X) {
-        // × → block all directions
-        v |= RMMV_FLAGS.PASS_DOWN | RMMV_FLAGS.PASS_LEFT | RMMV_FLAGS.PASS_RIGHT | RMMV_FLAGS.PASS_UP;
-        v |= (curRmmv & ~(RMMV_FLAGS.PASS_DIR_MASK | RMMV_FLAGS.TERRAIN_TAG_MASK));
+        // ✕ → block all 4 directions (0x0F), clear star
+        v |= RMMV_FLAGS.DIR_MASK;
+        v |= (curRmmv & ~PASS_CHUNK);
       } else if (passVal === Assets.TF_PASS_STAR) {
-        // ★ → terrain tag 0x0F, clear all direction blockers
-        v = RMMV_FLAGS.TERRAIN_TAG_MASK; // 0x0F
-        v |= (curRmmv & ~(RMMV_FLAGS.PASS_DIR_MASK | RMMV_FLAGS.TERRAIN_TAG_MASK));
+        // ★ → set star bit, clear direction blockers
+        v |= RMMV_FLAGS.STAR;
+        v |= (curRmmv & ~PASS_CHUNK);
       } else {
-        // ○ → clear terrain tag and all direction blockers, set bit 4 for autotile anim
-        v = RMMV_FLAGS.AUTOTILE_ANIM;
-        v |= (curRmmv & ~(RMMV_FLAGS.PASS_DIR_MASK | RMMV_FLAGS.TERRAIN_TAG_MASK | RMMV_FLAGS.AUTOTILE_ANIM));
+        // ○ → clear all direction bits, star, and terrain tag
+        v |= (curRmmv & ~PASS_CHUNK);
       }
-      m |= RMMV_FLAGS.PASS_DIR_MASK | RMMV_FLAGS.TERRAIN_TAG_MASK | RMMV_FLAGS.AUTOTILE_ANIM;
+      m |= PASS_CHUNK;
     }
     var result = { mask: m, value: v };
-    if (legacyMask & Assets.TF_DIR_N) { result.mask |= RMMV_FLAGS.PASS_UP; if (legacyVal & Assets.TF_DIR_N) result.value |= RMMV_FLAGS.PASS_UP; }
-    if (legacyMask & Assets.TF_DIR_S) { result.mask |= RMMV_FLAGS.PASS_DOWN; if (legacyVal & Assets.TF_DIR_S) result.value |= RMMV_FLAGS.PASS_DOWN; }
-    if (legacyMask & Assets.TF_DIR_E) { result.mask |= RMMV_FLAGS.PASS_RIGHT; if (legacyVal & Assets.TF_DIR_E) result.value |= RMMV_FLAGS.PASS_RIGHT; }
-    if (legacyMask & Assets.TF_DIR_W) { result.mask |= RMMV_FLAGS.PASS_LEFT; if (legacyVal & Assets.TF_DIR_W) result.value |= RMMV_FLAGS.PASS_LEFT; }
-    if (legacyMask & Assets.TF_LADDER)  { result.mask |= RMMV_FLAGS.LADDER; if (legacyVal & Assets.TF_LADDER) result.value |= RMMV_FLAGS.LADDER; }
-    if (legacyMask & Assets.TF_BUSH)    { result.mask |= RMMV_FLAGS.BUSH; if (legacyVal & Assets.TF_BUSH) result.value |= RMMV_FLAGS.BUSH; }
+    // Directional blockers (legacy dir → RMMV dir mapping)
+    if (legacyMask & Assets.TF_DIR_N) { result.mask |= RMMV_FLAGS.DIR_UP;   if (legacyVal & Assets.TF_DIR_N) result.value |= RMMV_FLAGS.DIR_UP; }
+    if (legacyMask & Assets.TF_DIR_S) { result.mask |= RMMV_FLAGS.DIR_DOWN; if (legacyVal & Assets.TF_DIR_S) result.value |= RMMV_FLAGS.DIR_DOWN; }
+    if (legacyMask & Assets.TF_DIR_E) { result.mask |= RMMV_FLAGS.DIR_RIGHT;if (legacyVal & Assets.TF_DIR_E) result.value |= RMMV_FLAGS.DIR_RIGHT; }
+    if (legacyMask & Assets.TF_DIR_W) { result.mask |= RMMV_FLAGS.DIR_LEFT; if (legacyVal & Assets.TF_DIR_W) result.value |= RMMV_FLAGS.DIR_LEFT; }
+    // Special flags
+    if (legacyMask & Assets.TF_LADDER)  { result.mask |= RMMV_FLAGS.LADDER;  if (legacyVal & Assets.TF_LADDER)  result.value |= RMMV_FLAGS.LADDER; }
+    if (legacyMask & Assets.TF_BUSH)    { result.mask |= RMMV_FLAGS.BUSH;    if (legacyVal & Assets.TF_BUSH)    result.value |= RMMV_FLAGS.BUSH; }
     if (legacyMask & Assets.TF_COUNTER) { result.mask |= RMMV_FLAGS.COUNTER; if (legacyVal & Assets.TF_COUNTER) result.value |= RMMV_FLAGS.COUNTER; }
+    if (legacyMask & Assets.TF_DAMAGE)  { result.mask |= RMMV_FLAGS.DAMAGE;  if (legacyVal & Assets.TF_DAMAGE)  result.value |= RMMV_FLAGS.DAMAGE; }
+    // Terrain tag (low 4 bits of legacy → high 4 bits of RMMV)
     if (legacyMask & Assets.TF_TERRAIN_MASK) {
       result.mask |= RMMV_FLAGS.TERRAIN_TAG_MASK;
-      result.value |= (legacyVal & Assets.TF_TERRAIN_MASK) >> (Assets.TF_TERRAIN_SHIFT - 0);
-    }
-    if (legacyMask & Assets.TF_DAMAGE) {
-      // TF_DAMAGE has no RMMV equivalent — silently ignore
+      var tag = (legacyVal & Assets.TF_TERRAIN_MASK) >> Assets.TF_TERRAIN_SHIFT;
+      result.value |= (tag << RMMV_FLAGS.TERRAIN_TAG_SHIFT);
     }
     return result;
   }
@@ -1189,128 +1264,13 @@ const editorI18n = await createEditorI18n({
     g.imageSmoothingEnabled = zoom >= 1;
     g.fillStyle = "#15151d";
     g.fillRect(0, 0, m.width * TILE, m.height * TILE);
-    // ---- grid-free rendering ----
-    if (m.gridFree && m.tilePlacements) {
-      for (let li = 0; li < LAYER_ORDER.length; li++) {
-        const ln = LAYER_ORDER[li];
-        const arr = m.tilePlacements[ln] || [];
-        // Y-sort within layer for depth
-        const sorted = [...arr].sort((a, b) => a.y - b.y);
-        g.globalAlpha = layerAlpha(li);
-        for (const p of sorted) {
-          Assets.drawTile(g, p.tileId, p.x, p.y);
-          // highlight selected placement
-          if (
-            selectedPlacement &&
-            selectedPlacement.placement &&
-            selectedPlacement.placement.id === p.id &&
-            selectedPlacement.layer === ln
-          ) {
-            g.strokeStyle = "#7ac8ff";
-            g.lineWidth = 2;
-            g.strokeRect(p.x + 1, p.y + 1, TILE - 2, TILE - 2);
-          }
-        }
-        if (li === 2) {
-          g.globalAlpha = 1;
-          drawShadows(g, m);
-        }
-      }
-      g.globalAlpha = 1;
-      // grid (also show for grid-free for reference)
-      g.strokeStyle = "rgba(255,255,255,0.09)";
-      g.lineWidth = 1 / zoom;
-      g.beginPath();
-      for (let x = 0; x <= m.width; x++) {
-        g.moveTo(x * TILE, 0);
-        g.lineTo(x * TILE, m.height * TILE);
-      }
-      for (let y = 0; y <= m.height; y++) {
-        g.moveTo(0, y * TILE);
-        g.lineTo(m.width * TILE, y * TILE);
-      }
-      g.stroke();
-      if (mode === "pass") drawPassOverlay(g, m);
-      if (mode === "height") drawHeightOverlay(g, m);
-      if (mode === "collision") drawCollisionOverlay(g, m);
-      if (mode === "flags") drawFlagsOverlay(g, m);
-      // events in grid-free mode
-      if (mode === "event" || mode === "start") {
-        for (const ev of m.events) {
-          g.fillStyle =
-            ev === selectedEvent
-              ? "rgba(120,200,255,0.35)"
-              : "rgba(255,255,255,0.14)";
-          g.fillRect(ev.x * TILE + 2, ev.y * TILE + 2, TILE - 4, TILE - 4);
-          g.strokeStyle =
-            ev === selectedEvent ? "#7ac8ff" : "rgba(255,255,255,0.6)";
-          g.lineWidth = 2 / zoom;
-          g.strokeRect(ev.x * TILE + 2, ev.y * TILE + 2, TILE - 4, TILE - 4);
-          const pg = ev.pages[0];
-          if (pg && pg.charset) {
-            const ci = Assets.charsetIndex(pg.charset);
-            if (ci >= 0)
-              Assets.drawChar(
-                g,
-                ci,
-                pg.dir || 0,
-                1,
-                ev.x * TILE,
-                ev.y * TILE - 6,
-              );
-          }
-        }
-      }
-      // start marker
-      if (proj.system.startMapId === m.id) {
-        g.fillStyle = "rgba(110,230,140,0.8)";
-        g.fillRect(
-          proj.system.startX * TILE + 8,
-          proj.system.startY * TILE + 8,
-          TILE - 16,
-          TILE - 16,
-        );
-        g.fillStyle = "#0c2c14";
-        g.font = "bold 22px monospace";
-        g.textAlign = "center";
-        g.textBaseline = "middle";
-        g.fillText(
-          "S",
-          proj.system.startX * TILE + TILE / 2,
-          proj.system.startY * TILE + TILE / 2 + 1,
-        );
-      }
-      // hover preview in grid-free mode
-      if (hoverCell && !pasteMode && mode === "map") {
-        // show a ghost of the selected tile at cursor
-        if (!dragPlacement) {
-          g.globalAlpha = 0.5;
-          Assets.drawTile(
-            g,
-            selectedTile,
-            hoverCell.x * TILE,
-            hoverCell.y * TILE,
-          );
-          g.globalAlpha = 1;
-          g.strokeStyle = "#ffffff";
-          g.lineWidth = 2 / zoom;
-          g.strokeRect(
-            hoverCell.x * TILE + 1,
-            hoverCell.y * TILE + 1,
-            TILE - 2,
-            TILE - 2,
-          );
-        }
-      }
-      return;
-    }
     // ---- grid-based rendering (supports RMMV data[] and legacy layers[]) ----
     for (let li = 0; li < LAYER_ORDER.length; li++) {
       g.globalAlpha = layerAlpha(li);
       for (let y = 0; y < m.height; y++) {
         for (let x = 0; x < m.width; x++) {
           const tid = mapTileId(m, x, y, li);
-          if (tid) Assets.drawTile(g, tid, x * TILE, y * TILE);
+          if (tid) Assets.drawTile(g, tid, x * TILE, y * TILE, m.tilesetId);
         }
       }
       if (li === 2) {
@@ -1534,6 +1494,28 @@ const editorI18n = await createEditorI18n({
       );
       tabBar.appendChild(btn);
     }
+    // RMMV tileset tabs
+    if (proj && Array.isArray(proj.tilesets)) {
+      for (let rmvIdx = 1; rmvIdx < proj.tilesets.length; rmvIdx++) {
+        const rts = proj.tilesets[rmvIdx];
+        if (!rts) continue;
+        const rkey = "rmmv:" + rmvIdx;
+        if (tilesetKeys.indexOf(rkey) >= 0) continue;
+        const rbtn = h(
+          "button",
+          {
+            class: "pal-tab" + (paletteTab === rkey ? " sel" : ""),
+            onclick() {
+              paletteTab = rkey;
+              rebuildPalTabs();
+              renderPalette();
+            },
+          },
+          rts.name || "TS" + rmvIdx,
+        );
+        tabBar.appendChild(rbtn);
+      }
+    }
     const todayBtn = h(
       "button",
       {
@@ -1638,8 +1620,28 @@ const editorI18n = await createEditorI18n({
       visibleTiles = allTiles
         .map((t, i) => i)
         .filter((i) => t && usedIds.has(i));
+    } else if (paletteTab.indexOf("rmmv:") === 0 && proj && Array.isArray(proj.tilesets)) {
+      // RMMV tileset tab: show tiles from all non-empty tilesheet slots
+      var rmvTsi = parseInt(paletteTab.slice(5), 10);
+      var rmvTs = proj.tilesets[rmvTsi];
+      visibleTiles = [];
+      if (rmvTs && rmvTs.tilesetNames) {
+        var slotNames = window.SLOT_NAMES || ["A1","A2","A3","A4","A5","B","C","D","E"];
+        var baseIds = window.TILE_ID_BASES || {};
+        var specs = Assets.MZ_TILESET_SPECS || {};
+        for (var si = 0; si < 9; si++) {
+          if (!rmvTs.tilesetNames[si]) continue;
+          var slotName = slotNames[si];
+          var sbase = baseIds[slotName];
+          var sspec = specs[slotName];
+          if (!sbase || !sspec) continue;
+          var stotal = sspec.cols * sspec.rows;
+          for (var ti = 0; ti < stotal; ti++) visibleTiles.push(sbase + ti);
+        }
+      }
+      if (!visibleTiles.length) visibleTiles = [0];
     } else {
-      // specific tileset tab
+      // specific legacy tileset tab
       const ts = Assets.tilesets[paletteTab];
       if (ts && ts.tileIds) {
         const category = (ts.category || "").toUpperCase();
@@ -1661,8 +1663,12 @@ const editorI18n = await createEditorI18n({
     // For B-E / non-autotile tilesets: expand tiles per tileset column count
     let cols = Assets.PALETTE_COLS;
     if (!paletteKindMode && paletteTab !== "all" && paletteTab !== "today") {
-      const ts = Assets.tilesets[paletteTab];
-      if (ts && ts.cols) cols = ts.cols;
+      if (paletteTab.indexOf("rmmv:") === 0) {
+        cols = 8;
+      } else {
+        const ts = Assets.tilesets[paletteTab];
+        if (ts && ts.cols) cols = ts.cols;
+      }
     }
     if (visibleTiles.length === 0) visibleTiles = [0];
     cols = Math.max(1, Math.min(cols, visibleTiles.length));
@@ -1712,8 +1718,8 @@ const editorI18n = await createEditorI18n({
           g.strokeRect(cx + 2, cy + 2, TILE - 4, TILE - 4);
         }
       }
-      // Draw marquee selection rectangle for B-E tilesets
-      if (paletteMarqueeStart && paletteMarqueeEnd) {
+      // Draw marquee selection rectangle for B-E tilesets (legacy only)
+      if (paletteMarqueeStart && paletteMarqueeEnd && paletteTab.indexOf("rmmv:") !== 0) {
         const ts3 = Assets.tilesets[paletteTab];
         if (ts3 && !/^A[1-5]$/i.test(ts3.category || "")) {
           const sc = ts3 ? ts3.cols : Assets.PALETTE_COLS;
@@ -1768,24 +1774,6 @@ const editorI18n = await createEditorI18n({
     const r = mapCanvas.getBoundingClientRect();
     return { x: (e.clientX - r.left) / zoom, y: (e.clientY - r.top) / zoom };
   }
-  function snapPx(px) {
-    if (snapMode === "free") return px;
-    const step = snapMode === "48" ? TILE : TILE / 2;
-    return Math.round(px / step) * step;
-  }
-  function placementAt(px, py, layer) {
-    const m = curMap();
-    if (!m || !m.tilePlacements) return null;
-    const layers = layer ? [layer] : LAYER_ORDER;
-    for (const ln of layers) {
-      for (const p of m.tilePlacements[ln] || []) {
-        if (px >= p.x && px < p.x + TILE && py >= p.y && py < p.y + TILE) {
-          return { placement: p, layer: ln };
-        }
-      }
-    }
-    return null;
-  }
 
   // ---- undo / redo (full map snapshots: tiles, shadows, passability, events, collision masks) ----
   function snapshotOf(mapId) {
@@ -1824,13 +1812,10 @@ const editorI18n = await createEditorI18n({
       rebuildMapList();
     }
     selectedEvent = null;
-    selectedPlacement = null;
-    dragPlacement = false;
-    dragPlacementObj = null;
     touch();
     renderMap();
     refreshToolbar();
-  }
+    }
   function pushUndo() {
     undoStack.push(snapshotOf(curMapId));
     if (undoStack.length > 60) undoStack.shift();
@@ -2576,28 +2561,6 @@ const editorI18n = await createEditorI18n({
       renderMap();
       return;
     }
-    // grid-free placement drag
-    if (mode === "map" && dragPlacement && dragPlacementObj) {
-      const px = pixelFromMouse(e);
-      if (!dragPlacementPushed) {
-        pushUndo();
-        dragPlacementPushed = true;
-        // refresh ref after undo snapshot cloned the placement
-        const m2 = curMap();
-        const arr2 = m2.tilePlacements[dragPlacementLayer] || [];
-        const updated = arr2.find((p) => p.id === dragPlacementObj.id);
-        if (updated) dragPlacementObj = updated;
-      }
-      if (dragPlacementObj) {
-        dragPlacementObj.x = snapPx(px.x - dragPlacementOffset.dx);
-        dragPlacementObj.y = snapPx(px.y - dragPlacementOffset.dy);
-        if (selectedPlacement) selectedPlacement.placement = dragPlacementObj;
-        updatePropsPanel(dragPlacementObj, dragPlacementLayer);
-        touch();
-        renderMap();
-      }
-      return;
-    }
     if (!cell) {
       if (changed) renderMap();
       return;
@@ -2803,25 +2766,7 @@ const editorI18n = await createEditorI18n({
                 : t("mode.desc.start"));
     if (hoverCell && m) {
       s += "  ·  " + hoverCell.x + "," + hoverCell.y;
-      if (mode === "map" && m.gridFree && m.tilePlacements) {
-        // show info about placement under cursor
-        const px = (hoverCell.x + 0.5) * TILE;
-        const py = (hoverCell.y + 0.5) * TILE;
-        const hit = placementAt(px, py);
-        if (hit) {
-          const t = Assets.tiles[hit.placement.tileId];
-          s += "  ·  " + hit.layer + ": " + (t ? t.name : "?");
-          if (
-            selectedPlacement &&
-            selectedPlacement.placement &&
-            selectedPlacement.placement.id === hit.placement.id
-          ) {
-            s += " [selected]";
-          }
-        } else {
-          s += "  ·  snap: " + snapMode;
-        }
-      } else if (mode === "map") {
+      if (mode === "map") {
         const ln =
           layer === "auto" ? topLayerAt(hoverCell.x, hoverCell.y) : layer;
         const t = getCell(hoverCell.x, hoverCell.y, ln);
@@ -2855,7 +2800,6 @@ const editorI18n = await createEditorI18n({
         t("status.brush") +
         ": " +
         (Assets.tiles[selectedTile] ? Assets.tiles[selectedTile].name : "?");
-      if (m && m.gridFree) s += "  ·  snap: " + snapMode;
     }
     $("status-text").textContent = s;
     $("zoom-ind").textContent = Math.round(zoom * 100) + "%";
@@ -2980,7 +2924,7 @@ const editorI18n = await createEditorI18n({
       h(
         "label",
         { class: "fld" },
-        h("span", null, "Set as Starting Map"),
+        h("span", null, t("dialog.starting_map")),
         chk(work, "setStart"),
       ),
     );
@@ -3676,11 +3620,11 @@ const editorI18n = await createEditorI18n({
       ),
       field("Music", sel(work, "music", MUSIC_OPTS())),
       field("Encounter rate (steps, 0 = off)", nIn(work, "rate", 0, 999)),
-      h("div", { class: "fld" }, h("span", null, "Encounter troops"), troopBox),
+      h("div", { class: "fld" }, h("span", null, t("dialog.encounter_troops")), troopBox),
       h(
         "div",
         { class: "fld" },
-        h("span", null, "HD-2D (3D perspective rendering)"),
+        h("span", null, t("dialog.hd2d_3d_rendering")),
       ),
       row(
         field("Enabled", chk(hdW, "enabled")),
@@ -6772,8 +6716,8 @@ const editorI18n = await createEditorI18n({
     wrap.appendChild(formEl);
     return wrap;
   }
-  function nameRefresher(e, redrawList) {
-    const inp = tIn(e, "name");
+  function nameRefresher(e, redrawList, i18nKey) {
+    const inp = i18nKey ? i18nIn(e, "name", i18nKey) : tIn(e, "name");
     inp.addEventListener("input", redrawList);
     return inp;
   }
@@ -6965,7 +6909,7 @@ const editorI18n = await createEditorI18n({
         },
       },
       {
-        label: "Actors",
+        label: t("db.tab.actors"),
         build: () =>
           listFormTab({
             list: () => proj.actors,
@@ -6989,7 +6933,7 @@ const editorI18n = await createEditorI18n({
               }
               box.appendChild(
                 row(
-                  field("Name", nameRefresher(e, redrawList)),
+                  field("Name", nameRefresher(e, redrawList, `db.actors.${e.id}.name`)),
                   field("Class", sel(e, "classId", dbOpts(proj.classes))),
                   field("Initial level", nIn(e, "level", 1, 99)),
                 ),
@@ -7017,7 +6961,7 @@ const editorI18n = await createEditorI18n({
           }),
       },
       {
-        label: "Classes",
+        label: t("db.tab.classes"),
         build: () =>
           listFormTab({
             list: () => proj.classes,
@@ -7049,7 +6993,7 @@ const editorI18n = await createEditorI18n({
             form(e, box, redrawList) {
               box.appendChild(
                 row(
-                  field("Name", nameRefresher(e, redrawList)),
+                  field("Name", nameRefresher(e, redrawList, `db.classes.${e.id}.name`)),
                   iconPickerField(e, redrawList),
                 ),
               );
@@ -7300,7 +7244,7 @@ const editorI18n = await createEditorI18n({
           }),
       },
       {
-        label: "Skills",
+        label: t("db.tab.skills"),
         build: () =>
           listFormTab({
             list: () => proj.skills,
@@ -7321,7 +7265,7 @@ const editorI18n = await createEditorI18n({
               if (!e.element) e.element = RA.elementOfSkill(e);
               box.appendChild(
                 row(
-                  field("Name", nameRefresher(e, redrawList)),
+                  field("Name", nameRefresher(e, redrawList, `db.skills.${e.id}.name`)),
                   iconPickerField(e, redrawList),
                   field("Type", sel(e, "type", skillTypeSelOpts())),
                   field("Element", sel(e, "element", elementSelOpts())),
@@ -7389,7 +7333,7 @@ const editorI18n = await createEditorI18n({
             form(e, box, redrawList) {
               box.appendChild(
                 row(
-                  field("Name", nameRefresher(e, redrawList)),
+                  field("Name", nameRefresher(e, redrawList, `db.items.${e.id}.name`)),
                   iconPickerField(e, redrawList),
                   field("Price", nIn(e, "price", 0)),
                 ),
@@ -7400,7 +7344,7 @@ const editorI18n = await createEditorI18n({
                   field("Restores MP", nIn(e, "mp", 0, 9999)),
                 ),
               );
-              box.appendChild(field("Description", tIn(e, "desc")));
+              box.appendChild(field("Description", i18nIn(e, "desc", `db.items.${e.id}.desc`)));
             },
           }),
       },
@@ -7421,7 +7365,7 @@ const editorI18n = await createEditorI18n({
               e.params = e.params || {};
               box.appendChild(
                 row(
-                  field("Name", nameRefresher(e, redrawList)),
+                  field("Name", nameRefresher(e, redrawList, `db.weapons.${e.id}.name`)),
                   iconPickerField(e, redrawList),
                   field("Type", sel(e, "wtypeId", typeSelOpts("weaponTypes"))),
                   field("Price", nIn(e, "price", 0)),
@@ -7456,7 +7400,7 @@ const editorI18n = await createEditorI18n({
               e.params = e.params || {};
               box.appendChild(
                 row(
-                  field("Name", nameRefresher(e, redrawList)),
+                  field("Name", nameRefresher(e, redrawList, `db.armors.${e.id}.name`)),
                   iconPickerField(e, redrawList),
                   field("Price", nIn(e, "price", 0)),
                 ),
@@ -7513,7 +7457,7 @@ const editorI18n = await createEditorI18n({
               });
               box.appendChild(
                 row(
-                  field("Name", nameRefresher(e, redrawList)),
+                  field("Name", nameRefresher(e, redrawList, `db.enemies.${e.id}.name`)),
                   field(
                     "Sprite",
                     sel(
@@ -7606,7 +7550,7 @@ const editorI18n = await createEditorI18n({
             list: () => proj.troops,
             blank: () => ({ id: 0, name: "Troop", enemies: [] }),
             form(e, box, redrawList) {
-              box.appendChild(field("Name", nameRefresher(e, redrawList)));
+              box.appendChild(field("Name", nameRefresher(e, redrawList, `db.troops.${e.id}.name`)));
               const mbox = h("div", { class: "frow" });
               function redrawM() {
                 mbox.innerHTML = "";
@@ -8378,7 +8322,7 @@ const editorI18n = await createEditorI18n({
               });
               box.appendChild(
                 row(
-                  field("Name", nameRefresher(e, redrawList)),
+                  field("Name", nameRefresher(e, redrawList, `db.states.${e.id}.name`)),
                   iconPickerField(e, redrawList),
                   field("Color", colorIn),
                 ),
@@ -8420,7 +8364,7 @@ const editorI18n = await createEditorI18n({
       {
         label: t("dialog.tilesets"),
         build() {
-          return buildTilesetTab(proj, Assets, t, h, touch);
+          return buildTilesetTab(proj, Assets, t, h, touch, modal);
         },
       },
     ];
@@ -9532,7 +9476,7 @@ atlas.onMapLoad((map) => {
     else saveIndicator.textContent = "✓ " + t("status.saved");
   }
   function openLanguageSettings() {
-    let selectedLocale = editorI18n.locale;
+    let selectedLocale = window.RPGAtlasI18n.instance.locale;
     const languageSelect = h(
       "select",
       {
@@ -9540,21 +9484,19 @@ atlas.onMapLoad((map) => {
           selectedLocale = e.target.value;
         },
       },
-      ...editorI18n
-        .locales()
-        .map((locale) =>
-          h(
-            "option",
-            {
-              value: locale.id,
-              ...(locale.id === selectedLocale ? { selected: "" } : {}),
-            },
-            locale.label,
-          ),
+      ...window.RPGAtlasI18n.instance.locales.map((locale) =>
+        h(
+          "option",
+          {
+            value: locale.id,
+            ...(locale.id === selectedLocale ? { selected: "" } : {}),
+          },
+          locale.label,
         ),
+      ),
     );
     modal({
-      title: "dialog.interface_language",
+      title: t("dialog.interface_language"),
       content: h(
         "div",
         null,
@@ -9565,19 +9507,19 @@ atlas.onMapLoad((map) => {
         {
           label: "btn.apply",
           primary: true,
-          onClick(close) {
-            editorI18n.setLocale(selectedLocale);
+          async onClick(close) {
+            await window.RPGAtlasI18n.instance.setLocale(selectedLocale);
             close();
             refreshLocalizedChrome();
           },
         },
-        { label: "btn.cancel" },
+        { label: "btn.cancel", onClick(close) { close(); } },
       ],
     });
   }
   function openPatchNotes() {
     const list = h("div", { class: "patch-notes" });
-    PATCH_NOTES.forEach((note) => {
+    getPatchNotes(t).forEach((note) => {
       const items = h("ul");
       (note.items || []).forEach((item) =>
         items.appendChild(h("li", null, item)),
@@ -9872,12 +9814,20 @@ atlas.onMapLoad((map) => {
     tip: "Save and run the game",
     run() {
       saveNow();
+      var playtestData = exportProjectForPlaytest();
       if (host.isTauri) {
+        localStorage.setItem("rpgatlas_playtest_data", JSON.stringify(playtestData));
         host
           .openPlaytest()
           .catch((e) => alert("Could not open play-test window: " + e.message));
       } else {
-        window.open("play.html", "rpgatlas_play");
+        var w = window.open("play.html", "rpgatlas_play");
+        if (w) {
+          w.RPGATLAS_PLAYTEST_DATA = playtestData;
+        } else {
+          localStorage.setItem("rpgatlas_playtest_data", JSON.stringify(playtestData));
+          window.open("play.html", "rpgatlas_play");
+        }
       }
     },
   });
@@ -10104,18 +10054,6 @@ atlas.onMapLoad((map) => {
     run: () => setZoom(1),
   });
   act("zoomfit", { label: "Fit Map In View", run: () => zoomFit() });
-  act("snap-toggle", {
-    label: "Toggle Snap",
-    icon: "snap",
-    tip: "Snap mode: " + snapMode,
-    active: () => false,
-    run() {
-      const cycle = { free: "24", 24: "48", 48: "free" };
-      snapMode = cycle[snapMode] || "free";
-      flashStatus("Snap: " + (snapMode === "free" ? "Free" : snapMode + "px"));
-      refreshToolbar();
-    },
-  });
 
   act("db", {
     label: "Database…",
@@ -10178,7 +10116,7 @@ atlas.onMapLoad((map) => {
       "tool-fill",
       "tool-shadow",
     ],
-    ["zoomin", "zoomout", "zoom1", "snap-toggle"],
+    ["zoomin", "zoomout", "zoom1"],
     ["db", "plugins", "audio", "search", "resources", "chargen"],
     ["hdpreview", "play"],
   ];
@@ -10348,10 +10286,7 @@ atlas.onMapLoad((map) => {
   function setMode(m) {
     mode = m;
     selectedEvent = null;
-    selectedPlacement = null;
     updatePropsPanel(null);
-    dragPlacement = false;
-    dragPlacementObj = null;
     pasteMode = null;
     renderMap();
     refreshToolbar();
@@ -10449,28 +10384,31 @@ atlas.onMapLoad((map) => {
       const ts = Assets.tilesets[paletteTab];
       const category = ts ? (ts.category || "").toUpperCase() : "";
       const isAutotile = /^A[1-5]$/.test(category);
-      if (isAutotile && ts && ts.autotile) {
-        // ---- autotile kind preview: select all tiles of this kind ----
-        const kg = computeKindPreview(ts);
-        const kindCols = Math.max(1, Math.min(cols, kg.length));
-        const ki = py * kindCols + px;
-        const kindGroup = kg[ki];
-        if (kindGroup && kindGroup.tileIds.length) {
-          selectedTile = kindGroup.tileIds[0];
-          paletteMarqueeTiles = [];
-          paletteMarqueeStart = null;
-          paletteMarqueeEnd = null;
-          renderPalette();
-          setStatus();
+      // RMMV tilesets: skip autotile kind preview and marquee, go to single-click
+      if (paletteTab.indexOf("rmmv:") !== 0) {
+        if (isAutotile && ts && ts.autotile) {
+          // ---- autotile kind preview: select all tiles of this kind ----
+          const kg = computeKindPreview(ts);
+          const kindCols = Math.max(1, Math.min(cols, kg.length));
+          const ki = py * kindCols + px;
+          const kindGroup = kg[ki];
+          if (kindGroup && kindGroup.tileIds.length) {
+            selectedTile = kindGroup.tileIds[0];
+            paletteMarqueeTiles = [];
+            paletteMarqueeStart = null;
+            paletteMarqueeEnd = null;
+            renderPalette();
+            setStatus();
+          }
+          return;
         }
-        return;
-      }
-      if (ts && !isAutotile && ts.cols > 1) {
-        // ---- B-E single-tile tileset: marquee selection ----
-        paletteMarqueeStart = { row: py, col: px };
-        paletteMarqueeEnd = null;
-        paletteMarqueeTiles = [];
-        return;
+        if (ts && !isAutotile && ts.cols > 1) {
+          // ---- B-E single-tile tileset: marquee selection ----
+          paletteMarqueeStart = { row: py, col: px };
+          paletteMarqueeEnd = null;
+          paletteMarqueeTiles = [];
+          return;
+        }
       }
       // ---- standard single-click selection ----
       let visibleTiles = [];
@@ -10498,6 +10436,25 @@ atlas.onMapLoad((map) => {
         visibleTiles = allTiles
           .map((t, i) => i)
           .filter((i) => t && usedIds.has(i));
+      } else if (paletteTab.indexOf("rmmv:") === 0 && proj && Array.isArray(proj.tilesets)) {
+        // RMMV visible tiles (same logic as renderPalette)
+        var rmvTsi = parseInt(paletteTab.slice(5), 10);
+        var rmvTs = proj.tilesets[rmvTsi];
+        visibleTiles = [];
+        if (rmvTs && rmvTs.tilesetNames) {
+          var slotNames = window.SLOT_NAMES || ["A1","A2","A3","A4","A5","B","C","D","E"];
+          var baseIds = window.TILE_ID_BASES || {};
+          var specs = Assets.MZ_TILESET_SPECS || {};
+          for (var si = 0; si < 9; si++) {
+            if (!rmvTs.tilesetNames[si]) continue;
+            var sname = slotNames[si];
+            var sbase = baseIds[sname];
+            var sspec = specs[sname];
+            if (!sbase || !sspec) continue;
+            var st = sspec.cols * sspec.rows;
+            for (var ti = 0; ti < st; ti++) visibleTiles.push(sbase + ti);
+          }
+        }
       } else {
         if (ts && ts.tileIds) {
           visibleTiles = ts.tileIds.filter((id) => id != null && allTiles[id]);
@@ -10515,7 +10472,7 @@ atlas.onMapLoad((map) => {
     });
     // Mouse up on palette (for B-E marquee completion)
     palCanvas.addEventListener("mouseup", () => {
-      if (paletteMarqueeStart && paletteMarqueeEnd) {
+      if (paletteMarqueeStart && paletteMarqueeEnd && paletteTab.indexOf("rmmv:") !== 0) {
         const ts2 = Assets.tilesets[paletteTab];
         if (ts2 && ts2.tileIds && !/^A[1-5]$/i.test(ts2.category || "")) {
           const sc = ts2.cols || Assets.PALETTE_COLS;
@@ -10550,9 +10507,10 @@ atlas.onMapLoad((map) => {
       const idx = py * cols + px;
       const allTiles = Assets.tiles;
       const ts = Assets.tilesets[paletteTab];
-      // Handle B-E marquee drag
+      // Handle B-E marquee drag (skip for RMMV)
       if (
         paletteMarqueeStart &&
+        paletteTab.indexOf("rmmv:") !== 0 &&
         ts &&
         ts.cols > 1 &&
         !/^A[1-5]$/i.test(ts.category || "")
@@ -10587,6 +10545,24 @@ atlas.onMapLoad((map) => {
         visibleTiles = allTiles
           .map((t, i) => i)
           .filter((i) => t && usedIds.has(i));
+      } else if (paletteTab.indexOf("rmmv:") === 0 && proj && Array.isArray(proj.tilesets)) {
+        var rmvTsi = parseInt(paletteTab.slice(5), 10);
+        var rmvTs = proj.tilesets[rmvTsi];
+        visibleTiles = [];
+        if (rmvTs && rmvTs.tilesetNames) {
+          var slotNames = window.SLOT_NAMES || ["A1","A2","A3","A4","A5","B","C","D","E"];
+          var baseIds = window.TILE_ID_BASES || {};
+          var specs = Assets.MZ_TILESET_SPECS || {};
+          for (var si = 0; si < 9; si++) {
+            if (!rmvTs.tilesetNames[si]) continue;
+            var sname = slotNames[si];
+            var sbase = baseIds[sname];
+            var sspec = specs[sname];
+            if (!sbase || !sspec) continue;
+            var st = sspec.cols * sspec.rows;
+            for (var ti = 0; ti < st; ti++) visibleTiles.push(sbase + ti);
+          }
+        }
       } else {
         if (ts && ts.tileIds) {
           visibleTiles = ts.tileIds.filter((id) => id != null && allTiles[id]);
@@ -10771,19 +10747,6 @@ atlas.onMapLoad((map) => {
               m.collision.masks.splice(selectedMask.index, 1);
             }
             selectedMask = null;
-            touch();
-            renderMap();
-            refreshToolbar();
-          } else if (mode === "map" && selectedPlacement) {
-            pushUndo();
-            const m = curMap();
-            const pl = m.tilePlacements[selectedPlacement.layer] || [];
-            const idx = pl.findIndex(
-              (p) => p.id === selectedPlacement.placement.id,
-            );
-            if (idx >= 0) pl.splice(idx, 1);
-            selectedPlacement = null;
-            updatePropsPanel(null);
             touch();
             renderMap();
             refreshToolbar();

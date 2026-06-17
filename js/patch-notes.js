@@ -6,6 +6,67 @@ export function getPatchNotes(t) {
   return [
    {
       date: "June 17, 2026",
+      title: "Remoção do Grid-Free Mapping",
+      summary: "Sistema de mapeamento livre (Grid-Free) foi removido para simplificar o editor e focar na compatibilidade padrão RMMV. Pixel Movement foi mantido.",
+      items: [
+        "Lógica de 'tilePlacements' e flag 'gridFree' removida do editor e da engine",
+        "Interface de 'snap' e arrasto de tiles livres removida",
+        "Física simplificada para focar em colisões baseadas em grade e máscaras livres",
+        "Pixel Movement (movimentação por pixel) preservado e funcional",
+      ],
+   },
+   {
+      date: "June 17, 2026",
+      title: "Sidebar com criação/deleção de tilesets",
+      summary: "Sidebar do editor de tilesets agora tem botões '+ New' e 'Delete', permitindo criar e remover tilesets como no RPG Maker.",
+      items: [
+        "Botão '+ New' na sidebar cria um novo tileset em branco com slots A1-E vazios",
+        "Botão 'Delete' remove o tileset selecionado com confirmação, preservando IDs estáveis",
+        "Nova chave i18n btn.new adicionada em todos os 5 locales",
+      ],
+   },
+   {
+      date: "June 17, 2026",
+      title: "Correção do Sistema de Flags RMMV — Engine-compatible Bit Layout",
+      summary: "Bit layout de flags corrigido para corresponder exatamente ao engine RMMV (rpg_objects.js): direções nos bits 0-3, star no bit 4, ladder/bush/counter/damage nos bits 5-8, terrain tag nos bits 12-15. Flag offsets e tile IDs alinhados com as constantes do engine (TILE_ID_*).",
+      items: [
+        "RMMV_FLAGS redefinido com bit layout do engine: DIR_DOWN(0x01), DIR_LEFT(0x02), DIR_RIGHT(0x04), DIR_UP(0x08), STAR(0x10), LADDER(0x20), BUSH(0x40), COUNTER(0x80), DAMAGE(0x100), terrain tag >>12",
+        "RMMV_FLAG_OFFSETS corrigido: A1=2048, A2=2816, A3=4352, A4=5888, A5=1536, B=0, C=256, D=512, E=768",
+        "getRmmvTileFlags/setRmmvTileFlags agora indexam por tileId diretamente (sem -2048)",
+        "decodeTileId reescrito para usar ranges do engine (B: 0-255, C: 256-511, ..., A4: 5888-8191)",
+        "Editor expandido de 5 para 9 abas (A1..A5 + B..E) — cada categoria tem sua aba",
+        "calculateNextFlagState, drawFlags e onCanvasDown corrigidos para o novo bit layout",
+        "rmmvToLegacyFlag e legacyMaskToRmmv atualizados para conversão correta"
+      ],
+   },
+   {
+      date: "June 17, 2026",
+      title: "Tileset Editor Refactor + Engine RMMV + StorageService",
+      summary: "Editor de tilesets refatorado com layout RMMV (5 colunas, tools verticais com labels completos), playtest agora usa o engine RMMV v1.6.2, nova camada de abstração de I/O (StorageService) e correção de overlays.",
+      items: [
+        "Nova coluna de ferramentas à direita com 7 botões: Passagem, Passagem (4 dir.), Escada, Arbusto, Balcão, Dano no Terreno, Tag de Terreno",
+        "Campo de notas (textarea) para cada tileset com i18n",
+        "Overlays dinâmicos no visualizador: ○, ×, ★ (só B-E), setas, ESC, ARB, BAL, DNO, tags 0-7 amarelas",
+        "Clique por zona na ferramenta Passagem (4 dir.) para alternar direções individuais",
+        "Playtest agora usa o engine RPG Maker MV v1.6.2 (rpg_core.js, rpg_managers.js, etc.) com bridge script",
+        "StorageService: nova abstração de I/O compatível com Tauri e Web (fetch/download)",
+        "Novos comandos Rust: list_directory, read_text_file, write_text_file, read_file_base64"
+      ],
+   },
+   {
+      date: "June 17, 2026",
+      title: t("patch_notes.title.36"),
+      summary: t("patch_notes.summary.36"),
+      items: [
+        t("patch_notes.item.36.1"),
+        t("patch_notes.item.36.2"),
+        t("patch_notes.item.36.3"),
+        t("patch_notes.item.36.4"),
+        t("patch_notes.item.36.5"),
+      ],
+   },
+   {
+      date: "June 17, 2026",
       title: t("patch_notes.title.35"),
       summary: t("patch_notes.summary.35"),
       items: [

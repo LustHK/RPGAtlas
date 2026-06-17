@@ -6,7 +6,7 @@ Migrar o sistema de dados de tilesets/tiles/mapas do RPGAtlas para o formato nat
 
 ---
 
-> **Última atualização:** 17 Jun 2026 — Fases 1-6 concluídas, Fase 7 pendente.
+> **Última atualização:** 17 Jun 2026 — Fases 1-6 concluídas, Fase 7 implementada (Parcial), Fase 4 concluída.
 
 ---
 
@@ -68,11 +68,35 @@ Migrar o sistema de dados de tilesets/tiles/mapas do RPGAtlas para o formato nat
 #### `index.html`
 - Script tags adicionados: `<script src="js/rmmv-tileid.js">`, `<script src="js/rmmv-flags.js">`
 
-#### `js/patch-notes.js`
+##### `js/patch-notes.js`
 - Entry #35 adicionado: "RPG Maker MV Data Format"
 
 #### `locales/*.json`
 - Keys `patch_notes.title.35`, `summary.35`, `item.35.1-4` sincronizadas em en, pt, es, fr, de
+
+### 17 Jun 2026 — Migração RMMV (Fase 7 + Palette)
+
+#### `js/editor/tileset-editor.js`
+- Adicionado suporte a tilesets RMMV (`proj.tilesets[]` array) lado a lado com tilesets legados (`Assets.tilesets`)
+- `tsKeys()` retorna chaves de ambos os formatos; chaves RMMV prefixadas com `rmmv:`
+- `getRmmvReg()` constrói entrada de registro dinâmica para um slot de tilesheet RMMV
+- `paintFlag()` bifurca para `paintRmmvFlag()` quando o tileset atual é RMMV
+- `paintRmmvFlag()` modifica bits de flag RMMV diretamente em `proj.tilesets[].flags[]`
+- `drawOverlay()` → `drawRmmvOverlay()` para sobreposição visual de flags RMMV
+- `redrawViewer()` carrega imagem de tilesheet via `Assets.getRmmvSheet()`/`loadRmmvSheet()` para RMMV
+- Abas de categoria (A1-E) alternam entre slots do mesmo tileset RMMV via `selectRmmvSlot()`
+- Editor de `tilesetNames[9]` (9 slots de arquivo A1-E) para tilesets RMMV
+- `exportJSON()`/`importJSON()` exportam/importam flags do slot RMMV selecionado
+- Constantes `CATEGORIES`, `MZ_TILESET_SPECS`, `RMMV_PREFIX`, helpers `isRmmvTilesetKey()`, `parseRmmvKey()`, `firstRmmvCategory()`
+
+#### `js/assets.js`
+- Exportados `MZ_TILESET_SPECS`, `getRmmvTileFlags`, `setRmmvTileFlags`, `setRmmvProjectRef`, `getRmmvSheet`, `loadRmmvSheet` no objeto público
+
+#### `js/editor.js`
+- `rebuildPalTabs()`: adiciona abas para tilesets de `proj.tilesets[]` quando em modo RMMV
+- `renderPalette()`: para aba RMMV, lista tile IDs de todos os slots não-vazios do tileset
+- Colunas da paleta definidas para 8 em modo RMMV
+- Handlers de clique/mouseup/mousemove da paleta ignoram autotile kind preview e marquee para abas RMMV
 
 ---
 
@@ -239,8 +263,8 @@ const TF_TERRAIN_TAG_MASK = 0x000F;
 | Arquivo | Mudanças Necessárias | Prioridade |
 |---------|---------------------|------------|
 | `js/assets.js` | Substituir constantes `TF_*` por `RMMV_FLAGS`. Atualizar `getTileFlags()`/`setTileFlags()`. Alterar `tilesets` registry. | 🔴 Alta |
-| `js/editor/tileset-editor.js` | Trocar constantes `TF_*` para RMMV. Ajustar `paintFlag()` para novo bit layout. Novo overlay com ícones RMMV. Edição de `tilesetNames[9]`. | 🔴 Alta |
-| `js/editor.js` (renderPalette) | `renderPalette()` e `rebuildPalTabs()` precisam de suporte a tilesets como array RMMV. | 🟡 Média |
+| `js/editor/tileset-editor.js` | ✅ Suporte RMMV implementado: `paintRmmvFlag()`, `drawRmmvOverlay()`, slot tabs, editor `tilesetNames[9]`, export/import de flags RMMV. `TF_*` legados mantidos para compat. | ✅ Completo |
+| `js/editor.js` (renderPalette) | ✅ Abas para `proj.tilesets[]` array adicionadas em `rebuildPalTabs()`. Tile IDs RMMV renderizados via `Assets.drawTile()`. Handlers de clique adaptados. | ✅ Completo |
 | `js/project-io.js` | Ajustar save/load folder para formato RMMV. | 🟢 Baixa |
 | `src-tauri/src/lib.rs` | Ajustar estrutura dos JSONs salvos. | 🟢 Baixa |
 
@@ -331,14 +355,19 @@ const TF_TERRAIN_TAG_MASK = 0x000F;
 
 **Observação:** `tilePassable()` em `engine.js` ainda usa `tileAt()` → `Assets.tiles[id].pass`. Enquanto `Assets.tiles[]` existir com `.pass`, isso funciona para tiles legados. Para tiles RMMV (≥2048), o `.pass` não existe — precisa ser lido de `Tilesets[tilesetId].flags[tileId]`.
 
-### Fase 7: Tileset Editor — ❌ PENDENTE
+### Fase 7: Tileset Editor — ✅ IMPLEMENTADO
 **Arquivo:** `js/editor/tileset-editor.js`
 
 | Item | Status | Notas |
 |------|--------|-------|
-| **7.1-7.5** | ❌ | Nenhuma alteração feita. Bloqueado pela Fase 2 (flags). |
+| **7.1** Abas de categoria (A1-E) alternam slots RMMV | ✅ | `selectRmmvSlot()` troca slot ativo no mesmo tileset |
+| **7.2** `paintFlag()` com bits RMMV | ✅ | `paintRmmvFlag()` modifica `proj.tilesets[].flags[]` diretamente |
+| **7.3** Overlay de flags RMMV | ✅ | `drawRmmvOverlay()` usa constantes RMMV (bits 0x000F, 0x0010, 0x0F00, etc.) |
+| **7.4** Editor `tilesetNames[9]` | ✅ | 9 inputs de texto para nomear arquivos de tilesheet por slot |
+| **7.5** Export/import de flags RMMV | ✅ | Exporta/importa flags do slot ativo via `baseTileId()` slice |
+| **7.6** `redrawViewer()` carrega tilesheet RMMV | ✅ | Usa `Assets.getRmmvSheet()`/`loadRmmvSheet()` com cache lazy |
 
-**Dependência:** Fase 2 precisa estar completa para que as constantes `RMMV_FLAGS` sejam usadas no editor de tileset.
+**Nota:** Tilesets legados (`Assets.tilesets`) continuam funcionando com `TF_*` — ambos os sistemas coexistem.
 
 ---
 
@@ -442,7 +471,7 @@ async function importRmmvProject(path) {
 - [x] Mapas do RMMV renderizam visualmente — `drawTile()` com tilesheets, `renderMap()` com `data[]`
 - [x] Ferramentas de pintura escrevem no `data[]` — via `setMapTileId()`/`setCell()`
 - [x] Passage check usa bits RMMV — `engine.js` `tilePassable()` e `physics.js` `rmmvTileIsBlocked()` implementados
-- [ ] Tileset editor exibe flags RMMV (bloqueado: Fase 7)
+- [x] Tileset editor exibe flags RMMV — overlays com bits RMMV via `drawRmmvOverlay()`
 - [x] Salvar projeto → JSONs espelham formato RMMV
 - [x] Recarregar projeto salvo → dados idênticos (migração v4 no load)
 

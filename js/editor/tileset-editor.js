@@ -3,63 +3,131 @@
    Copyright (C) 2026 RPGAtlas contributors — GPL-3.0-or-later (see LICENSE). */
 
 const TILE = 48;
-const CATEGORIES = ["A1","A2","A3","A4","A5","B","C","D","E"];
+const CATEGORIES = ["A1", "A2", "A3", "A4", "A5", "B", "C", "D", "E"];
 const CATEGORY_LABELS = {
-  A1: "tileset.tab_a1", A2: "tileset.tab_a2", A3: "tileset.tab_a3",
-  A4: "tileset.tab_a4", A5: "tileset.tab_a5", B: "tileset.tab_b",
-  C: "tileset.tab_c", D: "tileset.tab_d", E: "tileset.tab_e",
+  A1: "tileset.tab_a1",
+  A2: "tileset.tab_a2",
+  A3: "tileset.tab_a3",
+  A4: "tileset.tab_a4",
+  A5: "tileset.tab_a5",
+  B: "tileset.tab_b",
+  C: "tileset.tab_c",
+  D: "tileset.tab_d",
+  E: "tileset.tab_e",
 };
 
-const MZ_TILESET_SPECS = {
-  A1: { cols: 16, rows: 12, passDefault: false, terrain: false },
-  A2: { cols: 16, rows: 12, passDefault: true,  terrain: true },
-  A3: { cols: 16, rows: 8,  passDefault: false, terrain: false },
-  A4: { cols: 16, rows: 15, passDefault: true,  terrain: true },
-  A5: { cols: 8,  rows: 16, passDefault: true,  terrain: true },
-  B:  { cols: 16, rows: 16, passDefault: false, terrain: false },
-  C:  { cols: 16, rows: 16, passDefault: false, terrain: false },
-  D:  { cols: 16, rows: 16, passDefault: false, terrain: false },
-  E:  { cols: 16, rows: 16, passDefault: false, terrain: false },
+const RMMV_PREFIX = "rmmv:";
+const CATEGORY_SLOT_MAP = {
+  A1: 0,
+  A2: 1,
+  A3: 2,
+  A4: 3,
+  A5: 4,
+  B: 5,
+  C: 6,
+  D: 7,
+  E: 8,
 };
+const RMMV_FLAG_OFFSETS = {
+  A1: 2048, A2: 2816, A3: 4352, A4: 5888, A5: 1536,
+  B: 0, C: 256, D: 512, E: 768,
+};
+
+function rmmvTilesetKey(tsi) {
+  return RMMV_PREFIX + tsi;
+}
+function isRmmvTilesetKey(k) {
+  return typeof k === "string" && k.indexOf(RMMV_PREFIX) === 0;
+}
+function parseRmmvKey(k) {
+  return parseInt(k.slice(RMMV_PREFIX.length), 10);
+}
 
 const TOOLS = [
-  ["passage",  "tileset.tool_passage",  "P"],
-  ["dir-n",    "tileset.tool_dir_n",    "↑"],
-  ["dir-s",    "tileset.tool_dir_s",    "↓"],
-  ["dir-e",    "tileset.tool_dir_e",    "→"],
-  ["dir-w",    "tileset.tool_dir_w",    "←"],
-  ["ladder",   "tileset.tool_ladder",   "L"],
-  ["bush",     "tileset.tool_bush",     "B"],
-  ["counter",  "tileset.tool_counter",  "C"],
-  ["damage",   "tileset.tool_damage",   "D"],
-  ["terrain",  "tileset.tool_terrain",  "T"],
+  ["passage",     "tileset.tool_passage",     "○"],
+  ["passage4dir", "tileset.tool_passage4dir", "⇅"],
+  ["ladder",      "tileset.tool_ladder",       "⬆"],
+  ["bush",        "tileset.tool_bush",         "🌿"],
+  ["counter",     "tileset.tool_counter",      "▤"],
+  ["damage",      "tileset.tool_damage",       "⚡"],
+  ["terrain",     "tileset.tool_terrain",      "#"],
 ];
 
-export function buildTilesetTab(proj, Assets, t, h, touch) {
+/**
+ * Mapeia o índice do visualizador (8 colunas) para a coordenada física no arquivo (16 colunas).
+ */
+function getPhysicalCoordinates(index, category) {
+  if (category === "A5") {
+    // A5 é nativamente 8 colunas, sem mapeamento complexo
+    return { x: (index % 8) * TILE, y: Math.floor(index / 8) * TILE, col: index % 8, row: Math.floor(index / 8) };
+  }
+  // Para A1-A4 e B-E (que têm 16 colunas físicas no arquivo)
+  const displayCol = index % 8;
+  const displayRow = Math.floor(index / 8);
+  const physicalRow = Math.floor(displayRow / 2);
+  const physicalCol = displayCol + (displayRow % 2 === 1 ? 8 : 0);
+  return {
+    x: physicalCol * TILE,
+    y: physicalRow * TILE,
+    col: physicalCol,
+    row: physicalRow,
+  };
+}
+
+export function buildTilesetTab(proj, Assets, t, h, touch, modal) {
   let curTilesetKey = null;
   let curTool = "passage";
   let viewerZoom = 1.0;
   let showOverlay = true;
+  let curTab = "A2"; // Aba de exibição (A, B, C, D, E)
   let isPainting = false;
-  let lastPaintedIdx = -1;
+  let dragFlagState = -1;
 
   const container = h("div", { class: "dbtab" });
 
   // --- sidebar: tileset list ---
   const side = h("div", { class: "dbside" });
+  const listBtns = h("div", { class: "dbbtns" },
+    h("button", {
+      onclick() { createNewTileset(); }
+    }, "+ " + t("btn.new")),
+    h("button", {
+      onclick() { deleteTileset(); }
+    }, t("btn.delete")),
+  );
   const listEl = h("ul", { class: "dblist" });
+  side.appendChild(listBtns);
   side.appendChild(listEl);
   container.appendChild(side);
 
   // --- main form area ---
-  const form = h("div", { class: "dbform" });
+  const form = h("div", { class: "dbform rmmv-style" });
   container.appendChild(form);
 
   // --- state ---
   let viewerWrap, viewerCanvas, viewerCtx;
 
+  function isRmmvProject() {
+    return Array.isArray(proj.tilesets);
+  }
+
   function tsKeys() {
-    return Object.keys(Assets.tilesets || {}).sort();
+    var legacy = Object.keys(Assets.tilesets || {}).sort();
+    var rmmv = [];
+    if (isRmmvProject()) {
+      for (var i = 1; i < proj.tilesets.length; i++) {
+        if (proj.tilesets[i]) rmmv.push(rmmvTilesetKey(i));
+      }
+    }
+    return legacy.concat(rmmv);
+  }
+
+  function getTilesetData() {
+    if (!curTilesetKey) return null;
+    if (isRmmvTilesetKey(curTilesetKey)) {
+      return proj.tilesets[parseRmmvKey(curTilesetKey)];
+    }
+    return Assets.tilesets[curTilesetKey];
   }
 
   function rebuildList() {
@@ -70,13 +138,25 @@ export function buildTilesetTab(proj, Assets, t, h, touch) {
       return;
     }
     for (const k of keys) {
-      const reg = Assets.tilesets[k];
-      const li = h("li", {
-        class: k === curTilesetKey ? "sel" : "",
-        onclick() { selectTileset(k); },
-      },
-        h("span", { class: "db-entry-id" }, reg.category + ":"),
-        h("span", null, k),
+      let name = "";
+      let prefix = "";
+      if (isRmmvTilesetKey(k)) {
+        const id = parseRmmvKey(k);
+        prefix = id.toString().padStart(4, "0");
+        name = proj.tilesets[id] ? proj.tilesets[id].name : "Tileset " + id;
+      } else {
+        name = k;
+      }
+      const li = h(
+        "li",
+        {
+          class: k === curTilesetKey ? "sel" : "",
+          onclick() {
+            selectTileset(k);
+          },
+        },
+        h("span", { class: "db-entry-id" }, prefix),
+        h("span", null, name),
       );
       listEl.appendChild(li);
     }
@@ -88,567 +168,464 @@ export function buildTilesetTab(proj, Assets, t, h, touch) {
     rebuildForm();
   }
 
-  function getReg() {
-    return curTilesetKey ? (Assets.tilesets[curTilesetKey] || null) : null;
-  }
-
-  function getSpec() {
-    const reg = getReg();
-    if (!reg) return null;
-    const specs = MZ_TILESET_SPECS;
-    return specs ? (specs[reg.category] || null) : null;
-  }
-
-  function tileSubIndex(tile) {
-    if (!tile || !tile.tileset) return -1;
-    const ts = Assets.tilesets[tile.tileset];
-    if (!ts) return -1;
-    return tile.tilesetY * ts.cols + tile.tilesetX;
-  }
-
-  function tileIdxToId(spec, cols, row, col) {
-    const reg = getReg();
-    if (!reg || !reg.tileIds) return -1;
-    const idx = row * cols + col;
-    if (idx < 0 || idx >= reg.tileIds.length) return -1;
-    return reg.tileIds[idx];
-  }
-
-  function paintFlag(tileId, fromPropagation) {
-    const reg = getReg();
-    if (!reg) return;
-    const tile = Assets.tiles ? Assets.tiles[tileId] : null;
-    if (!tile || !tile.tileset) return;
-    const si = tileSubIndex(tile);
-    if (si < 0) return;
-    const tsKey = tile.tileset;
-    let flags = Assets.getTileFlags(tsKey, si);
-
-    switch (curTool) {
-      case "passage": {
-        const cur = flags & Assets.TF_PASS_MASK;
-        let next;
-        if (cur === Assets.TF_PASS_O) next = Assets.TF_PASS_X;
-        else if (cur === Assets.TF_PASS_X) {
-          const cat = reg.category || "";
-          if (cat[0] === "A") next = Assets.TF_PASS_O;
-          else next = Assets.TF_PASS_STAR;
-        } else next = Assets.TF_PASS_O;
-        flags = (flags & ~Assets.TF_PASS_MASK) | next;
-        break;
-      }
-      case "dir-n": flags ^= Assets.TF_DIR_N; break;
-      case "dir-s": flags ^= Assets.TF_DIR_S; break;
-      case "dir-e": flags ^= Assets.TF_DIR_E; break;
-      case "dir-w": flags ^= Assets.TF_DIR_W; break;
-      case "ladder": flags ^= Assets.TF_LADDER; break;
-      case "bush":   flags ^= Assets.TF_BUSH; break;
-      case "counter": flags ^= Assets.TF_COUNTER; break;
-      case "damage":  flags ^= Assets.TF_DAMAGE; break;
-      case "terrain": {
-        const cur = (flags & Assets.TF_TERRAIN_MASK) >> Assets.TF_TERRAIN_SHIFT;
-        const next = (cur + 1) % 8;
-        flags = (flags & ~Assets.TF_TERRAIN_MASK) | (next << Assets.TF_TERRAIN_SHIFT);
-        break;
-      }
+  function createNewTileset() {
+    if (!isRmmvProject()) {
+      alert("Can only create tilesets in RMMV project format.");
+      return;
     }
-
-    _applyFlag(tsKey, si, flags);
-
-    // Propagate to all sub-tiles in the same autotile kind group
-    if (!fromPropagation) {
-      const cat = reg.category || "";
-      if (/^A[1-4]$/.test(cat) && reg.autotile) {
-        const kindIdx = tile.kindIndex;
-        if (kindIdx != null) {
-          for (const otherId of reg.tileIds) {
-            if (otherId === tileId) continue;
-            const otherTile = Assets.tiles[otherId];
-            if (!otherTile || otherTile.kindIndex !== kindIdx) continue;
-            const otherSi = tileSubIndex(otherTile);
-            if (otherSi >= 0) _applyFlag(tsKey, otherSi, flags);
-          }
-        }
-      }
-    }
-
+    const id = proj.tilesets.length;
+    const ts = {
+      id: id,
+      name: "New Tileset",
+      mode: 0,
+      note: "",
+      tilesetNames: ["", "", "", "", "", "", "", "", ""],
+      flags: new Uint16Array(8192),
+    };
+    proj.tilesets.push(ts);
     touch();
-    redrawViewer();
+    selectTileset(rmmvTilesetKey(id));
   }
 
-  function _applyFlag(tsKey, si, flags) {
-    Assets.setTileFlags(tsKey, si, flags);
+  function deleteTileset() {
+    if (!curTilesetKey || !isRmmvTilesetKey(curTilesetKey)) return;
+    const ts = getTilesetData();
+    if (!ts) return;
+    modal({
+      title: "dialog.confirm",
+      content: h("div", null, t("status.confirm_delete_entry", { name: ts.name || "this tileset" })),
+      buttons: [
+        { label: "btn.ok", primary: true, onClick(c) { c(); doDelete(); } },
+        { label: "btn.cancel" },
+      ],
+    });
+    function doDelete() {
+      const id = parseRmmvKey(curTilesetKey);
+      proj.tilesets[id] = null;
+      // update tileset that use this index to point to the next valid one
+      const keys = tsKeys();
+      curTilesetKey = keys.length > 0 ? keys[0] : null;
+      touch();
+      rebuildList();
+      rebuildForm();
+    }
   }
 
-  function paintAt(row, col) {
-    const spec = getSpec();
-    const reg = getReg();
-    if (!spec || !reg) return;
-    const cols = spec.cols;
-    const tileId = tileIdxToId(spec, cols, row, col);
-    if (tileId < 0) return;
-    paintFlag(tileId, false);
-  }
+  // --- rendering logic ---
 
-  // --- viewer drawing ---
   function redrawViewer() {
     if (!viewerCanvas || !viewerCtx) return;
     const g = viewerCtx;
-    const reg = getReg();
-    const spec = getSpec();
+    const ts = getTilesetData();
+    if (!ts) return;
 
-    let cols = 16, rows = 16;
-    if (spec) { cols = spec.cols; rows = spec.rows; }
-
-    const w = Math.round(cols * TILE * viewerZoom);
-    const h2 = Math.round(rows * TILE * viewerZoom);
-    viewerCanvas.width = w;
-    viewerCanvas.height = h2;
+    // Configurar o tamanho do canvas baseado no zoom
+    // O visualizador RMMV sempre mostra 8 colunas de tiles
+    const cols = 8;
+    const rows = 32; // Mostramos 32 linhas por padrão
+    viewerCanvas.width = cols * TILE * viewerZoom;
+    viewerCanvas.height = rows * TILE * viewerZoom;
     g.setTransform(viewerZoom, 0, 0, viewerZoom, 0, 0);
 
-    g.fillStyle = "#15151d";
+    g.fillStyle = "#1c1c1c";
     g.fillRect(0, 0, cols * TILE, rows * TILE);
 
-    if (reg && reg.image) {
-      g.imageSmoothingEnabled = false;
-      g.drawImage(reg.image, 0, 0, reg.image.width, reg.image.height, 0, 0, cols * TILE, rows * TILE);
+    // Determinar qual arquivo de imagem carregar baseado na aba ativa
+    const category = resolveCategoryForTab(curTab);
+    const slotIdx = CATEGORY_SLOT_MAP[category];
+    const filename = ts.tilesetNames ? ts.tilesetNames[slotIdx] : (ts.file || "");
+
+    if (filename) {
+      const img = Assets.getRmmvSheet ? Assets.getRmmvSheet(category, filename) : null;
+      if (img && img.complete) {
+        g.imageSmoothingEnabled = false;
+        // Desenhar os tiles mapeados
+        for (let i = 0; i < cols * rows; i++) {
+          const phys = getPhysicalCoordinates(i, category);
+          const rect = { x: (i % 8) * TILE, y: Math.floor(i / 8) * TILE };
+          // Verifica se as coordenadas físicas estão dentro da imagem
+          if (phys.x < img.width && phys.y < img.height) {
+            g.drawImage(img, phys.x, phys.y, TILE, TILE, rect.x, rect.y, TILE, TILE);
+          }
+        }
+      } else {
+        console.log("TilesetEditor: Carregando via Assets.loadRmmvSheet:", category, filename);
+        if (Assets.loadRmmvSheet) Assets.loadRmmvSheet(category, filename).then(redrawViewer);
+      }
     }
 
-    // grid
-    g.strokeStyle = "rgba(255,255,255,0.12)";
+    // Grid
+    g.strokeStyle = "rgba(255,255,255,0.1)";
     g.lineWidth = 1;
-    for (let col = 0; col <= cols; col++) {
-      const x = col * TILE;
-      g.beginPath(); g.moveTo(x, 0); g.lineTo(x, rows * TILE); g.stroke();
+    for (let c = 0; c <= cols; c++) {
+      g.beginPath(); g.moveTo(c * TILE, 0); g.lineTo(c * TILE, rows * TILE); g.stroke();
     }
-    for (let row = 0; row <= rows; row++) {
-      const y = row * TILE;
-      g.beginPath(); g.moveTo(0, y); g.lineTo(cols * TILE, y); g.stroke();
+    for (let r = 0; r <= rows; r++) {
+      g.beginPath(); g.moveTo(0, r * TILE); g.lineTo(cols * TILE, r * TILE); g.stroke();
     }
 
-    if (showOverlay && reg && reg.tileIds) {
-      drawOverlay(g, reg, spec, cols, rows);
+    // Overlays (Flags)
+    if (showOverlay) {
+      drawFlags(g, ts, category, cols * rows);
     }
   }
 
-  function drawOverlay(g, reg, spec, cols, rows) {
-    for (let row = 0; row < rows; row++) {
-      for (let col = 0; col < cols; col++) {
-        const idx = row * cols + col;
-        if (idx >= reg.tileIds.length) continue;
-        const tileId = reg.tileIds[idx];
-        const tile = Assets.tiles ? Assets.tiles[tileId] : null;
-        if (!tile || !tile.tileset) continue;
-        const si = tileSubIndex(tile);
-        if (si < 0) continue;
-        const flags = Assets.getTileFlags(tile.tileset, si);
-        if (!flags) continue;
-        const cx = col * TILE, cy = row * TILE;
+  function resolveCategoryForTab(tab) {
+    // With 9 tabs (A1..A5,B..E), the tab IS the category
+    return tab;
+  }
 
-        const passage = flags & Assets.TF_PASS_MASK;
-        if (passage === Assets.TF_PASS_X) {
+  function getFlagOffset(category) {
+    return RMMV_FLAG_OFFSETS[category] || 0;
+  }
+
+  function drawFlags(g, ts, category, count) {
+    const offset = getFlagOffset(category);
+    const flags = ts.flags || [];
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+
+    for (let i = 0; i < count; i++) {
+      const phys = getPhysicalCoordinates(i, category);
+      const flagIdx = offset + (phys.row * (category === "A5" ? 8 : 16) + phys.col);
+      const flag = flags[flagIdx] || 0;
+      const x = (i % 8) * TILE;
+      const y = Math.floor(i / 8) * TILE;
+      const cx = x + TILE / 2;
+      const cy = y + TILE / 2;
+
+      if (curTool === "passage") {
+        const isStar = !!(flag & 0x0010);
+        const isBlocked = (flag & 0x000F) === 0x000F;
+        if (isStar) {
+          g.fillStyle = "#ffd86a";
+          g.font = "bold 20px sans-serif";
+          g.fillText("★", cx, cy);
+        } else if (isBlocked) {
           g.strokeStyle = "#ff4444";
           g.lineWidth = 3;
-          const r = TILE * 0.2;
           g.beginPath();
-          g.moveTo(cx + TILE/2 - r, cy + TILE/2 - r);
-          g.lineTo(cx + TILE/2 + r, cy + TILE/2 + r);
-          g.moveTo(cx + TILE/2 + r, cy + TILE/2 - r);
-          g.lineTo(cx + TILE/2 - r, cy + TILE/2 + r);
+          g.moveTo(x + 14, y + 14); g.lineTo(x + 34, y + 34);
+          g.moveTo(x + 34, y + 14); g.lineTo(x + 14, y + 34);
           g.stroke();
-        } else if (passage === Assets.TF_PASS_STAR) {
-          g.fillStyle = "#ffd86a";
-          g.font = "bold 14px monospace";
-          g.textAlign = "center";
-          g.textBaseline = "middle";
-          g.fillText("★", cx + TILE/2, cy + TILE/2);
+        } else {
+          g.strokeStyle = "#44ff44";
+          g.lineWidth = 3;
+          g.beginPath();
+          g.arc(cx, cy, 10, 0, Math.PI * 2);
+          g.stroke();
         }
-
-        if (flags & Assets.TF_DIR_N) {
-          g.fillStyle = "#ff6644";
-          g.fillRect(cx + 14, cy + 2, 20, 6);
-        }
-        if (flags & Assets.TF_DIR_S) {
-          g.fillStyle = "#ff6644";
-          g.fillRect(cx + 14, cy + TILE - 8, 20, 6);
-        }
-        if (flags & Assets.TF_DIR_W) {
-          g.fillStyle = "#ff6644";
-          g.fillRect(cx + 2, cy + 14, 6, 20);
-        }
-        if (flags & Assets.TF_DIR_E) {
-          g.fillStyle = "#ff6644";
-          g.fillRect(cx + TILE - 8, cy + 14, 6, 20);
-        }
-
-        let badge = 0;
-        if (flags & Assets.TF_LADDER) badge++;
-        if (flags & Assets.TF_BUSH) badge++;
-        if (flags & Assets.TF_COUNTER) badge++;
-        if (flags & Assets.TF_DAMAGE) badge++;
-        if (badge) {
-          g.font = "10px monospace";
-          g.textAlign = "left";
-          g.textBaseline = "top";
-          let bx = cx + 2;
-          if (flags & Assets.TF_LADDER) { g.fillStyle = "#8a6af0"; g.fillText("L", bx, cy + 2); bx += 10; }
-          if (flags & Assets.TF_BUSH)   { g.fillStyle = "#6ab84a"; g.fillText("B", bx, cy + 2); bx += 10; }
-          if (flags & Assets.TF_COUNTER){ g.fillStyle = "#f0a030"; g.fillText("C", bx, cy + 2); bx += 10; }
-          if (flags & Assets.TF_DAMAGE) { g.fillStyle = "#f06060"; g.fillText("D", bx, cy + 2); }
-        }
-
-        const tag = (flags & Assets.TF_TERRAIN_MASK) >> Assets.TF_TERRAIN_SHIFT;
-        if (tag) {
-          g.fillStyle = "#80c0ff";
-          g.font = "10px monospace";
-          g.textAlign = "right";
-          g.textBaseline = "bottom";
-          g.fillText("T" + tag, cx + TILE - 2, cy + TILE - 2);
-        }
+      } else if (curTool === "passage4dir") {
+        const blockedDown  = !!(flag & 0x0001);
+        const blockedLeft  = !!(flag & 0x0002);
+        const blockedRight = !!(flag & 0x0004);
+        const blockedUp    = !!(flag & 0x0008);
+        g.font = "bold 14px sans-serif";
+        g.fillStyle = blockedDown  ? "#666" : "#4f4";
+        g.fillText(blockedDown  ? "—" : "↓", cx, y + 40);
+        g.fillStyle = blockedLeft  ? "#666" : "#4f4";
+        g.fillText(blockedLeft  ? "—" : "←", x + 10, cy);
+        g.fillStyle = blockedRight ? "#666" : "#4f4";
+        g.fillText(blockedRight ? "—" : "→", x + 38, cy);
+        g.fillStyle = blockedUp    ? "#666" : "#4f4";
+        g.fillText(blockedUp    ? "—" : "↑", cx, y + 10);
+      } else if (curTool === "ladder" && (flag & 0x0020)) {
+        g.fillStyle = "#5fc8e8";
+        g.font = "bold 12px sans-serif";
+        g.fillText("ESC", cx, cy);
+      } else if (curTool === "bush" && (flag & 0x0040)) {
+        g.fillStyle = "#6ab84a";
+        g.font = "bold 12px sans-serif";
+        g.fillText("ARB", cx, cy);
+      } else if (curTool === "counter" && (flag & 0x0080)) {
+        g.fillStyle = "#f0a030";
+        g.font = "bold 12px sans-serif";
+        g.fillText("BAL", cx, cy);
+      } else if (curTool === "damage" && (flag & 0x0100)) {
+        g.fillStyle = "#f06060";
+        g.font = "bold 11px sans-serif";
+        g.fillText("DNO", cx, cy);
+      } else if (curTool === "terrain") {
+        const tag = (flag >> 12) & 0x0F;
+        const displayTag = tag > 7 ? 7 : tag;
+        g.fillStyle = "#ffd86a";
+        g.font = "bold 16px sans-serif";
+        g.fillText(String(displayTag), cx, cy);
       }
     }
   }
 
-  // --- canvas mouse handlers ---
-  function canvasCoords(e) {
-    const rect = viewerCanvas.getBoundingClientRect();
-    return {
-      x: (e.clientX - rect.left) / viewerZoom,
-      y: (e.clientY - rect.top) / viewerZoom,
-    };
-  }
+  // --- interaction ---
 
   function onCanvasDown(e) {
     if (e.button !== 0) return;
-    const pos = canvasCoords(e);
-    const spec = getSpec();
-    if (!spec) return;
-    const col = Math.floor(pos.x / TILE);
-    const row = Math.floor(pos.y / TILE);
-    if (col < 0 || col >= spec.cols || row < 0 || row >= spec.rows) return;
+    const rect = viewerCanvas.getBoundingClientRect();
+    const lx = (e.clientX - rect.left) / viewerZoom;
+    const ly = (e.clientY - rect.top) / viewerZoom;
+    const col = Math.floor(lx / TILE);
+    const row = Math.floor(ly / TILE);
+    if (col < 0 || col >= 8 || row < 0 || row >= 32) return;
+
+    const index = row * 8 + col;
+    const ts = getTilesetData();
+    const category = resolveCategoryForTab(curTab);
+    const phys = getPhysicalCoordinates(index, category);
+    const flagIdx = getFlagOffset(category) + (phys.row * (category === "A5" ? 8 : 16) + phys.col);
+    const current = (ts.flags || [])[flagIdx] || 0;
+
     isPainting = true;
-    lastPaintedIdx = row * spec.cols + col;
-    paintAt(row, col);
+
+    if (curTool === "passage4dir") {
+      const tileX = lx - col * TILE;
+      const tileY = ly - row * TILE;
+      const margin = 12;
+      let newFlag = current;
+      if (tileY >= TILE - margin) newFlag ^= 0x0001; // down
+      if (tileX < margin)         newFlag ^= 0x0002; // left
+      if (tileX >= TILE - margin) newFlag ^= 0x0004; // right
+      if (tileY < margin)         newFlag ^= 0x0008; // up
+      dragFlagState = newFlag;
+    } else {
+      dragFlagState = calculateNextFlagState(current, category);
+    }
+
+    applyFlag(ts, flagIdx, dragFlagState);
+    redrawViewer();
   }
 
   function onCanvasMove(e) {
-    const pos = canvasCoords(e);
-    const spec = getSpec();
-    if (!spec) return;
-    const col = Math.floor(pos.x / TILE);
-    const row = Math.floor(pos.y / TILE);
-    if (col < 0 || col >= spec.cols || row < 0 || row >= spec.rows) return;
+    if (!isPainting) return;
+    const rect = viewerCanvas.getBoundingClientRect();
+    const lx = (e.clientX - rect.left) / viewerZoom;
+    const ly = (e.clientY - rect.top) / viewerZoom;
+    const col = Math.floor(lx / TILE);
+    const row = Math.floor(ly / TILE);
+    if (col < 0 || col >= 8 || row < 0 || row >= 32) return;
 
-    if (isPainting && e.buttons & 1) {
-      const idx = row * spec.cols + col;
-      if (idx !== lastPaintedIdx) {
-        lastPaintedIdx = idx;
-        paintAt(row, col);
-      }
+    const index = row * 8 + col;
+    const ts = getTilesetData();
+    const category = resolveCategoryForTab(curTab);
+    const phys = getPhysicalCoordinates(index, category);
+    const flagIdx = getFlagOffset(category) + (phys.row * (category === "A5" ? 8 : 16) + phys.col);
+
+    if ((ts.flags || [])[flagIdx] !== dragFlagState) {
+      applyFlag(ts, flagIdx, dragFlagState);
+      redrawViewer();
     }
-    updateHover(col, row);
   }
 
   function onCanvasUp() {
     isPainting = false;
-    lastPaintedIdx = -1;
   }
 
-  function onCanvasWheel(e) {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? -0.25 : 0.25;
-    viewerZoom = Math.max(0.25, Math.min(4, viewerZoom + delta));
-    updateZoomDisplay();
-    redrawViewer();
-  }
-
-  let hoverCol = -1, hoverRow = -1;
-
-  function updateHover(col, row) {
-    if (col !== hoverCol || row !== hoverRow) {
-      hoverCol = col;
-      hoverRow = row;
-      redrawViewer();
-      drawHover();
+  function calculateNextFlagState(current, category) {
+    const canStar = category ? !["A1","A2","A3","A4","A5"].includes(category) : true;
+    switch (curTool) {
+      case "passage": {
+        const isBlocked = (current & 0x000F) === 0x000F;
+        const isStar = !!(current & 0x0010);
+        if (isBlocked && canStar)
+          return (current & ~0x001F) | 0x0010;
+        if (isBlocked)
+          return (current & ~0x001F) | 0x0000;
+        if (isStar)
+          return (current & ~0x001F) | 0x0000;
+        return (current & ~0x001F) | 0x000F;
+      }
+      case "passage4dir":
+        return current ^ 0x000F;
+      case "ladder": return current ^ 0x0020;
+      case "bush":   return current ^ 0x0040;
+      case "counter": return current ^ 0x0080;
+      case "damage":  return current ^ 0x0100;
+      case "terrain": {
+        let tag = (current >> 12) & 0x0F;
+        tag = (tag + 1) % 8;
+        return (current & 0x0FFF) | (tag << 12);
+      }
     }
+    return current;
   }
 
-  function drawHover() {
-    if (!viewerCtx || hoverCol < 0 || hoverRow < 0) return;
-    const g = viewerCtx;
-    g.strokeStyle = "rgba(255,216,106,0.6)";
-    g.lineWidth = 2 / viewerZoom;
-    g.strokeRect(hoverCol * TILE, hoverRow * TILE, TILE, TILE);
+  function applyFlag(ts, idx, state) {
+    if (!ts.flags) ts.flags = new Uint16Array(8192);
+    ts.flags[idx] = state;
+    touch();
   }
 
-  // --- zoom ---
-  function updateZoomDisplay() {
-    const el = container.querySelector(".tse-zoom-label");
-    if (el) el.textContent = Math.round(viewerZoom * 100) + "%";
-  }
+  // --- UI building ---
 
-  function zoomIn() {
-    viewerZoom = Math.min(4, viewerZoom + 0.5);
-    updateZoomDisplay();
-    redrawViewer();
-  }
-  function zoomOut() {
-    viewerZoom = Math.max(0.25, viewerZoom - 0.5);
-    updateZoomDisplay();
-    redrawViewer();
-  }
-  function zoomReset() {
-    viewerZoom = 1.0;
-    updateZoomDisplay();
-    redrawViewer();
-  }
-
-  // --- gallery modal ---
-  function openGallery() {
-    const cat = getReg() ? getReg().category : "B";
-    // Remove existing overlay
-    const old = container.querySelector(".tse-gallery-overlay");
-    if (old) old.remove();
-
-    const overlay = h("div", {
-      class: "tse-gallery-overlay",
-      onclick(e) { if (e.target === overlay) overlay.remove(); },
-      style: "position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.75);display:flex;flex-direction:column;align-items:center;justify-content:center",
-    });
-
-    const modal = h("div", {
-      style: "background:#1c1c24;border:1px solid #3c3c44;border-radius:8px;max-width:90vw;max-height:85vh;overflow:auto;padding:16px",
-    });
-
-    const titleRow = h("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:12px" });
-    titleRow.appendChild(h("b", null, t("tileset.gallery")));
-    const closeBtn = h("button", {
-      class: "mini",
-      onclick() { overlay.remove(); },
-    }, "✕");
-    titleRow.appendChild(closeBtn);
-    modal.appendChild(titleRow);
-
-    // Fetch manifest and build grid
-    fetch("img/assets.json")
-      .then(r => r.json())
-      .then(manifest => {
-        const items = manifest.tilesets || [];
-        if (!items.length) {
-          modal.appendChild(h("div", { class: "dim" }, t("tileset.gallery_empty")));
-          return;
-        }
-        // Group by category
-        const byCat = {};
-        for (const fname of items) {
-          const m = fname.match(/Tile(A[1-5]|[B-E])\.png$/);
-          const c = m ? m[1] : "?";
-          if (!byCat[c]) byCat[c] = [];
-          byCat[c].push(fname);
-        }
-
-        // Sort categories
-        const catOrder = CATEGORIES.filter(c => byCat[c]);
-        for (const c of catOrder) {
-          const group = h("div", { style: "margin-bottom:12px" });
-          group.appendChild(h("div", { style: "font-size:12px;color:#888;margin-bottom:4px" }, t("tileset.gallery_category", { cat: c })));
-          const grid = h("div", { style: "display:flex;flex-wrap:wrap;gap:6px" });
-
-          for (const fname of byCat[c]) {
-            const thumbSize = c[0] === "A" ? 96 : 64;
-            const thumb = h("canvas", {
-              width: thumbSize,
-              height: Math.round(thumbSize * (c[0] === "A" ? 0.75 : 1)),
-              style: "cursor:pointer;border:2px solid transparent;border-radius:4px;image-rendering:pixelated",
-              onmouseenter(e) { e.target.style.borderColor = "#ffd86a"; },
-              onmouseleave(e) { e.target.style.borderColor = "transparent"; },
-              onclick() {
-                overlay.remove();
-                // Check if there's a tileset with this category
-                const foundKey = Object.keys(Assets.tilesets).find(
-                  k => Assets.tilesets[k].category === c
-                );
-                if (foundKey && foundKey !== curTilesetKey) {
-                  selectTileset(foundKey);
-                }
-              },
-            });
-            grid.appendChild(thumb);
-
-            // Load image for thumbnail
-            const img = new Image();
-            img.onload = () => {
-              const ctx = thumb.getContext("2d");
-              ctx.imageSmoothingEnabled = false;
-              ctx.drawImage(img, 0, 0, thumb.width, thumb.height);
-            };
-            img.src = "img/tilesets/" + fname;
-          }
-          group.appendChild(grid);
-          modal.appendChild(group);
-        }
-      })
-      .catch(() => {
-        modal.appendChild(h("div", { class: "dim" }, t("tileset.gallery_empty")));
-      });
-
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
-  }
-
-  // --- rebuild form ---
   function rebuildForm() {
     form.innerHTML = "";
-    if (!curTilesetKey) {
-      form.appendChild(h("div", { class: "dim", style: "padding:40px;text-align:center" }, t("tileset.no_selection")));
+    const ts = getTilesetData();
+    if (!ts) {
+      form.appendChild(h("div", { class: "dim" }, t("tileset.no_selection")));
       return;
     }
 
-    const reg = getReg();
-    if (!reg) {
-      form.appendChild(h("div", { class: "dim", style: "padding:40px;text-align:center" }, "Tileset data not available"));
-      return;
-    }
+    // ── TOP: name + mode + image slots ──
+    const top = h("div", { class: "rmmv-top" });
 
-    const cat = reg.category || "B";
-
-    // info row
-    const infoRow = h("div", { class: "frow", style: "align-items:center;gap:12px" });
-    infoRow.appendChild(h("b", null, curTilesetKey));
-    infoRow.appendChild(h("span", { class: "dim" }, t(CATEGORY_LABELS[cat]) + " — " + (reg.file || "")));
-    infoRow.appendChild(h("span", { class: "dim" }, reg.cols + "×" + reg.rows + " tiles"));
-    form.appendChild(infoRow);
-
-    // category tabs (clickable — navigates to the tileset of that category)
-    const tabBar = h("div", { class: "tse-tabs" });
-    CATEGORIES.forEach(c => {
-      const isActive = c === cat;
-      tabBar.appendChild(h("button", {
-        class: isActive ? "sel" : "",
-        onclick() {
-          const found = Object.values(Assets.tilesets).find(ts => ts.category === c);
-          if (found) selectTileset(found.key);
+    const nameFld = h("div", { class: "frow" },
+      h("label", null, t("tileset.name"), h("br"),
+        h("input", {
+          type: "text",
+          value: ts.name || "",
+          oninput(e) { ts.name = e.target.value; touch(); rebuildList(); }
+        })
+      ),
+      h("label", null, t("tileset.mode"), h("br"),
+        h("select", {
+          onchange(e) { ts.mode = Number(e.target.value); touch(); },
         },
-      }, t(CATEGORY_LABELS[c])));
+          h("option", { value: 0, selected: ts.mode === 0 ? "selected" : null }, t("tileset.mode_world")),
+          h("option", { value: 1, selected: ts.mode === 1 ? "selected" : null }, t("tileset.mode_area")),
+        )
+      )
+    );
+    top.appendChild(nameFld);
+
+    // Slots A1..E
+    const slots = h("div", { class: "tileset-slots" });
+    CATEGORIES.forEach((cat, i) => {
+      const val = ts.tilesetNames ? ts.tilesetNames[i] : (ts.category === cat ? ts.file : "");
+      const row = h("div", { class: "slot-row" },
+        h("span", { class: "slot-label" }, cat + ":"),
+        h("input", {
+          type: "text",
+          value: val || "",
+          onchange(e) {
+            if (!ts.tilesetNames) ts.tilesetNames = new Array(9).fill("");
+            ts.tilesetNames[i] = e.target.value;
+            touch();
+            redrawViewer();
+          }
+        }),
+        h("button", {
+          class: "mini",
+          onclick: () => openFilePicker(i)
+        }, "...")
+      );
+      slots.appendChild(row);
     });
-    form.appendChild(tabBar);
+    top.appendChild(slots);
+    form.appendChild(top);
 
-    // file slot display + gallery button
-    const fileSlot = h("div", { class: "tse-file-row" });
-    const fname = reg.file || "(no file)";
-    fileSlot.appendChild(h("span", null, t("tileset.file_slot", { name: fname })));
-    fileSlot.appendChild(h("button", {
-      class: "mini",
-      style: "margin-left:8px",
-      onclick: openGallery,
-    }, t("tileset.gallery_change")));
-    form.appendChild(fileSlot);
+    // ── MIDDLE: tabs + canvas + tools ──
+    const middle = h("div", { class: "rmmv-middle" });
 
-    // tool bar
-    const toolBar = h("div", { class: "tse-toolbar" });
-    TOOLS.forEach(([id, labelKey, icon]) => {
-      toolBar.appendChild(h("button", {
-        class: id === curTool ? "sel" : "",
-        title: t(labelKey),
-        onclick() { curTool = id; rebuildForm(); },
-      }, icon));
+    // Center: tabs + canvas
+    const center = h("div", { class: "dbform-center" });
+    const tabs = h("div", { class: "dbform-tabs" });
+    CATEGORIES.forEach(cat => {
+      tabs.appendChild(h("button", {
+        class: curTab === cat ? "sel" : "",
+        onclick() { curTab = cat; redrawViewer(); rebuildForm(); }
+      }, cat));
     });
-    form.appendChild(toolBar);
+    center.appendChild(tabs);
 
-    // viewer
-    viewerWrap = h("div", { class: "tse-viewer-wrap" });
+    viewerWrap = h("div", { class: "tse-viewer-wrap rmmv-viewer" });
     viewerCanvas = h("canvas", { class: "tse-canvas" });
     viewerCtx = viewerCanvas.getContext("2d");
-    viewerWrap.appendChild(viewerCanvas);
-
     viewerCanvas.addEventListener("mousedown", onCanvasDown);
     viewerCanvas.addEventListener("mousemove", onCanvasMove);
-    viewerCanvas.addEventListener("mouseup", onCanvasUp);
-    viewerCanvas.addEventListener("mouseleave", () => {
-      isPainting = false;
-      lastPaintedIdx = -1;
-      hoverCol = -1; hoverRow = -1;
-      redrawViewer();
+    window.addEventListener("mouseup", onCanvasUp);
+    viewerWrap.appendChild(viewerCanvas);
+    center.appendChild(viewerWrap);
+    middle.appendChild(center);
+
+    // Side panel: tools
+    const sidePanel = h("div", { class: "dbform-side" });
+    const tools = h("div", { class: "tse-tools-vert" });
+    TOOLS.forEach(([id, labelKey, icon]) => {
+      tools.appendChild(h("button", {
+        class: curTool === id ? "sel" : "",
+        title: t(labelKey),
+        onclick() {
+          curTool = id;
+          redrawViewer();
+          tools.querySelectorAll("button").forEach(b => b.classList.remove("sel"));
+          this.classList.add("sel");
+        }
+      },
+        h("span", { class: "tool-icon" }, icon),
+        h("span", { class: "tool-label" }, t(labelKey))
+      ));
     });
-    viewerCanvas.addEventListener("wheel", onCanvasWheel, { passive: false });
-    form.appendChild(viewerWrap);
+    sidePanel.appendChild(tools);
+    middle.appendChild(sidePanel);
+    form.appendChild(middle);
 
-    // zoom bar
-    const zoomBar = h("div", { class: "tse-zoom-bar" });
-    zoomBar.appendChild(h("button", { class: "mini", onclick: zoomIn, title: t("tileset.zoom_in") }, "+"));
-    zoomBar.appendChild(h("button", { class: "mini", onclick: zoomOut, title: t("tileset.zoom_out") }, "−"));
-    zoomBar.appendChild(h("button", { class: "mini", onclick: zoomReset, title: t("tileset.zoom_reset") }, "1:1"));
-    zoomBar.appendChild(h("span", { class: "tse-zoom-label dim" }, Math.round(viewerZoom * 100) + "%"));
-
-    const overlayChk = h("input", {
-      type: "checkbox",
-      checked: showOverlay ? "checked" : null,
-      onchange(e) { showOverlay = e.target.checked; redrawViewer(); },
-    });
-    zoomBar.appendChild(h("label", null, overlayChk, " ", t("tileset.show_overlay")));
-    form.appendChild(zoomBar);
-
-    // action buttons
-    const actionBar = h("div", { class: "frow", style: "margin-top:8px;gap:6px" });
-    actionBar.appendChild(h("button", {
-      class: "mini",
-      onclick: exportJSON,
-    }, t("tileset.export_json")));
-    actionBar.appendChild(h("button", {
-      class: "mini",
-      onclick: importJSON,
-    }, t("tileset.import_json")));
-    form.appendChild(actionBar);
+    // ── BOTTOM: note (full width) ──
+    const bottom = h("div", { class: "rmmv-bottom" });
+    bottom.appendChild(
+      h("div", { class: "note-area" },
+        h("label", null, t("tileset.note")),
+        h("textarea", {
+          oninput(e) { ts.note = e.target.value; touch(); }
+        }, ts.note || "")
+      )
+    );
+    form.appendChild(bottom);
 
     redrawViewer();
   }
 
-  // --- export / import ---
-  function exportJSON() {
-    if (!curTilesetKey) return;
-    const reg = getReg();
-    const flagArr = reg ? Assets.exportTileFlags(curTilesetKey) : [];
-    const tsEntry = proj.tilesets ? proj.tilesets[curTilesetKey] : null;
-    const data = {
-      key: curTilesetKey,
-      category: reg ? reg.category : "",
-      file: reg ? reg.file : "",
-      cols: reg ? reg.cols : 0,
-      rows: reg ? reg.rows : 0,
-      flags: flagArr,
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = h("a", { href: url, download: curTilesetKey + "_flags.json" });
-    a.click();
-    URL.revokeObjectURL(url);
+  async function openFilePicker(slotIdx) {
+    const ts = getTilesetData();
+    const filename = ts.tilesetNames ? ts.tilesetNames[slotIdx] : "";
+
+    let files = [];
+    try {
+        const response = await fetch("img/tilesets/");
+        if (response.ok) {
+            const text = await response.text();
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(text, 'text/html');
+            const links = Array.from(doc.querySelectorAll('a'));
+            files = links.map(a => a.innerText).filter(f => f.endsWith('.png'));
+        }
+    } catch (e) {
+        console.warn("Não foi possível listar arquivos via fetch, usando fallback.", e);
+    }
+
+    if (files.length === 0) {
+        files = Object.values(Assets.tilesets || {}).map(ts => ts.file + ".png");
+    }
+
+    if (files.length === 0) {
+        alert(t("tileset.gallery_empty"));
+        return;
+    }
+
+    // Filtra arquivos que contenham o Tile especificado no nome (ex: "TileA2")
+    const filteredFiles = files.filter(f => f.includes(filename.replace("Tile", "")));
+    const finalFiles = filteredFiles.length > 0 ? filteredFiles : files;
+
+    const list = h("div", { class: "tileset-file-list" });
+    const modalInstance = modal({
+        title: t("tileset.select_file"),
+        content: list,
+        buttons: [{ label: t("btn.cancel"), onClick: (c) => c() }]
+    });
+
+    finalFiles.forEach(f => {
+        const name = f.replace(/\.png$/i, "");
+        list.appendChild(h("div", {
+            class: "minirow",
+            onclick() {
+                if (!ts.tilesetNames) ts.tilesetNames = new Array(9).fill("");
+                ts.tilesetNames[slotIdx] = name;
+                touch();
+                redrawViewer();
+                rebuildForm();
+                modalInstance.close();
+            }
+        }, name));
+    });
   }
 
-  function importJSON() {
-    const inp = h("input", { type: "file", accept: ".json",
-      onchange(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          try {
-            const data = JSON.parse(ev.target.result);
-            if (!curTilesetKey) return;
-            if (data.flags && Array.isArray(data.flags)) {
-              Assets.loadTileFlags(curTilesetKey, data.flags);
-            }
-            touch();
-            rebuildForm();
-            redrawViewer();
-          } catch (err) {
-            alert("Invalid JSON: " + err.message);
-          }
-        };
-        reader.readAsText(file);
-      }
-    });
-    inp.click();
-  }
 
   // --- init ---
   const keys = tsKeys();
@@ -657,3 +634,15 @@ export function buildTilesetTab(proj, Assets, t, h, touch) {
 
   return container;
 }
+
+const MZ_TILESET_SPECS = {
+  A1: { cols: 16, rows: 12, w: 768, h: 576 },
+  A2: { cols: 16, rows: 12, w: 768, h: 576 },
+  A3: { cols: 16, rows: 8, w: 768, h: 384 },
+  A4: { cols: 16, rows: 15, w: 768, h: 720 },
+  A5: { cols: 8, rows: 16, w: 384, h: 768 },
+  B: { cols: 16, rows: 16, w: 768, h: 768 },
+  C: { cols: 16, rows: 16, w: 768, h: 768 },
+  D: { cols: 16, rows: 16, w: 768, h: 768 },
+  E: { cols: 16, rows: 16, w: 768, h: 768 },
+};

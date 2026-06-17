@@ -198,6 +198,7 @@
   "btn.save": "Save",
   "btn.generate": "Generate",
   "btn.add": "Add",
+  "btn.new": "New",
   "btn.delete": "Delete",
   "btn.search": "Search",
   "btn.png": "PNG",
@@ -330,6 +331,13 @@
   "patch_notes.item.33.4": "Klicken zum Malen und Ziehen zum Zeichnen für schnelle Flag-Bearbeitung",
   "patch_notes.item.33.5": "Umschaltbare Eigenschaftsüberlagerung mit allen Flags pro Tile",
   "patch_notes.item.33.6": "JSON-Export/Import für Datenportabilität",
+  "patch_notes.title.36": "RMMV-Tileset-Editor und Palette",
+  "patch_notes.summary.36": "Der Tilesets-Tab der Datenbank unterstützt jetzt das RMMV-Tileset-Format mit nativer Flag-Bearbeitung, Tilesheet-Slot-Verwaltung und Palettenintegration für RMMV-Tiles.",
+  "patch_notes.item.36.1": "Der Tileset-Editor zeigt RMMV-Tilesets aus Projektdaten an, mit A1-E-Slot-Tabs zum Wechseln zwischen Tilesheets",
+  "patch_notes.item.36.2": "RMMV-Flag-Bearbeitung (Passage, Richtung, Leiter, Busch, Tresen, Geländemarkierung) mit nativem RMMV-Bit-Layout",
+  "patch_notes.item.36.3": "Neuer tilesetNames[9]-Editor zur Verwaltung der 9 Tilesheet-Datei-Slots pro Tileset",
+  "patch_notes.item.36.4": "Die Palette enthält jetzt Tabs für jedes RMMV-Tileset und zeigt Tiles aus allen geladenen Tilesheet-Slots an",
+  "patch_notes.item.36.5": "Flag-Export/Import funktioniert pro Tilesheet-Slot für RMMV-Tilesets",
   "patch_notes.title.35": "RPG Maker MV Data Format",
   "patch_notes.summary.35": "Migrated project data model to full RMMV compatibility: interleaved data array, 1-indexed tilesets array with flags[2048], and new tile ID system (0-10752).",
   "patch_notes.item.35.1": "New projects use RMMV-style map data (data[] interleaved 4 layers) and tilesets array",
@@ -582,5 +590,8 @@
   "tileset.gallery": "Tileset-Galerie",
   "tileset.gallery_change": "Ändern…",
   "tileset.gallery_empty": "Keine Tileset-Bilder gefunden",
-  "tileset.gallery_category": "Kategorie {cat}"
+  "tileset.gallery_category": "Kategorie {cat}",
+  "tileset.tool_passage4dir": "Passage (4 Richt.)",
+  "tileset.note": "Notiz",
+  "tileset.mode_world": "Weltkarte"
 }

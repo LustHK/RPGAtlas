@@ -120,6 +120,7 @@
   "btn.save": "Enregistrer",
   "btn.generate": "Générer",
   "btn.add": "Ajouter",
+  "btn.new": "Nouveau",
   "action.mode_flags": "Tile Flags Mode",
   "dialog.database": "Database",
   "dialog.plugin_manager": "Plugin Manager",
@@ -331,6 +332,13 @@
   "patch_notes.item.33.4": "Cliquez pour peindre et glissez pour dessiner en édition rapide",
   "patch_notes.item.33.5": "Superposition de propriétés affichant les flags par tile",
   "patch_notes.item.33.6": "Export/Import JSON pour la portabilité des données",
+  "patch_notes.title.36": "Éditeur de Tilesets RMMV et Palette",
+  "patch_notes.summary.36": "L'onglet Tilesets de la Base de Données supporte désormais le format de tileset RMMV avec édition native des flags, gestion des emplacements de tilesheet et intégration avec la palette pour les tiles RMMV.",
+  "patch_notes.item.36.1": "L'éditeur de Tilesets affiche les tilesets RMMV des données du projet, avec des onglets de slot A1-E pour basculer entre les tilesheets",
+  "patch_notes.item.36.2": "Édition des flags RMMV (passage, direction, échelle, buisson, comptoir, tag de terrain) en utilisant le layout de bits RMMV natif",
+  "patch_notes.item.36.3": "Nouvel éditeur tilesetNames[9] pour gérer les 9 emplacements de fichier de tilesheet par tileset",
+  "patch_notes.item.36.4": "La palette inclut désormais des onglets pour chaque tileset RMMV, affichant les tiles de tous les emplacements de tilesheet chargés",
+  "patch_notes.item.36.5": "L'exportation/importation de flags fonctionne par emplacement de tilesheet pour les tilesets RMMV",
   "patch_notes.title.35": "RPG Maker MV Data Format",
   "patch_notes.summary.35": "Migrated project data model to full RMMV compatibility: interleaved data array, 1-indexed tilesets array with flags[2048], and new tile ID system (0-10752).",
   "patch_notes.item.35.1": "New projects use RMMV-style map data (data[] interleaved 4 layers) and tilesets array",
@@ -583,5 +591,8 @@
   "tileset.gallery": "Galerie de Tilesets",
   "tileset.gallery_change": "Changer…",
   "tileset.gallery_empty": "Aucune image de tileset trouvée",
-  "tileset.gallery_category": "Catégorie {cat}"
+  "tileset.gallery_category": "Catégorie {cat}",
+  "tileset.tool_passage4dir": "Passage (4 dir.)",
+  "tileset.note": "Note",
+  "tileset.mode_world": "Carte du Monde"
 }

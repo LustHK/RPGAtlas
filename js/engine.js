@@ -428,9 +428,6 @@ const _createMessageSystem = window.createMessageSystem;
   }
   function tilePassable(x, y) {
     if (x < 0 || y < 0 || x >= map.width || y >= map.height) return false;
-    if (map.gridFree && map._passGrid) {
-      return map._passGrid[y * map.width + x] !== 0;
-    }
     const ov = map.passOv ? map.passOv[y * map.width + x] : 0;
     if (ov === 1) return true;
     if (ov === 2) return false;
@@ -439,15 +436,13 @@ const _createMessageSystem = window.createMessageSystem;
       var tid = tileAt(["ground","decor","decor2"][li], x, y);
       if (tid === 0) continue;
       // RMMV tile ID: decode flags from tileset
-      if (tid >= 2048 && typeof Assets.getRmmvTileFlags === "function") {
+      if (typeof Assets.getRmmvTileFlags === "function") {
         var f = Assets.getRmmvTileFlags(tid);
         if (f != null) {
-          // RMMV passage: autotile anim (bit 4) → always passable
+          // Star bit (bit 4) → no effect on passage (always passable)
           if (f & 0x0010) return true;
-          // Terrain tag 0x0F → star passage
-          if ((f & 0x000F) === 0x000F) return true;
-          // Any direction blocker → ×
-          if (f & 0x0F00) return false;
+          // Any direction blocker (bits 0-3) → ×
+          if (f & 0x000F) return false;
           // No blockers → ○
           return true;
         }
@@ -545,12 +540,6 @@ const _createMessageSystem = window.createMessageSystem;
   }
 
   async function prerenderMap() {
-    if (map.gridFree) {
-      lowerBuf = null;
-      upperBuf = null;
-      hdActive = false;
-      return;
-    }
     lowerBuf = document.createElement("canvas");
     lowerBuf.width = map.width * TILE;
     lowerBuf.height = map.height * TILE;
@@ -1451,7 +1440,34 @@ const _createMessageSystem = window.createMessageSystem;
       // Same no-dead-frame pattern as the player above: a finished step chains into the next
       // route/random step this same tick instead of pausing a frame at each tile.
       if (rt.moving) {
-        updateEntityMotion(rt, rt.speed);
+        // Move with physics
+        const speed = rt.speed || 0.085;
+        const dx = (rt.tx - rt.x) * speed;
+        const dy = (rt.ty - rt.y) * speed;
+        
+        const move = Physics.moveWithSlide(
+          rt.body,
+          dx,
+          dy,
+          physicsWorld || { tileBodies: [], dynamicBodies: [] }
+        );
+        
+        // sync
+        rt.body.x += move.x;
+        rt.body.y += move.y;
+        
+        rt.px = rt.body.x - (TILE - rt.body.w) / 2;
+        rt.py = rt.body.y - (TILE - rt.body.h);
+        
+        rt.animT = (rt.animT || 0) + 1;
+        
+        // check arrival
+        const dist = Math.sqrt(Math.pow(rt.tx - (rt.px/TILE), 2) + Math.pow(rt.ty - (rt.py/TILE), 2));
+        if (dist < 0.1) {
+          rt.x = rt.tx;
+          rt.y = rt.ty;
+          rt.moving = false;
+        }
       }
       if (!rt.moving && rt.route) {
         updateRoute(rt);
@@ -1672,24 +1688,7 @@ const _createMessageSystem = window.createMessageSystem;
       });
     }
 
-    if (map.gridFree) {
-      ctx.save();
-      ctx.translate(Math.round(shakeX), Math.round(shakeY));
-      ctx.scale(cameraZoom, cameraZoom);
-      for (const ln of ["ground", "decor", "decor2"]) {
-        renderTilePlacements(ctx, map.tilePlacements[ln] || [], camX, camY, viewW, viewH);
-      }
-      for (const d of drawables) {
-        const idx = d === p ? p.charsetIdx : d.charsetIdx;
-        Assets.drawChar(
-          ctx, idx, d.dir, walkFrame(d),
-          Math.round(d.rx * TILE - camX),
-          Math.round(d.ry * TILE - 8 - camY),
-        );
-      }
-      renderTilePlacements(ctx, map.tilePlacements["over"] || [], camX, camY, viewW, viewH);
-      ctx.restore();
-    } else if (!hdActive) {
+    if (!hdActive) {
       ctx.save();
       ctx.translate(Math.round(shakeX), Math.round(shakeY));
       ctx.scale(cameraZoom, cameraZoom);
@@ -3561,7 +3560,10 @@ const _createMessageSystem = window.createMessageSystem;
     const projectPathParam = urlParams.get("projectPath");
     if (projectPathParam) {
       const folderProj = await loadProjectFromPath(projectPathParam);
-      if (folderProj) proj = folderProj;
+      if (folderProj) {
+        proj = folderProj;
+        await i18n.instance.loadProjectLocales(projectPathParam);
+      }
     }
     if (!proj) proj = loadProject();
     applyScreenSettings();

@@ -3,7 +3,6 @@
   "name": "MAP0001",
   "width": 20,
   "height": 15,
-  "gridFree": true,
   "music": "field",
   "encounters": {
     "troops": [],
@@ -21,12 +20,6 @@
   "collision": {
     "tiles": [],
     "masks": []
-  },
-  "tilePlacements": {
-    "ground": [],
-    "decor": [],
-    "decor2": [],
-    "over": []
   },
   "events": []
 }

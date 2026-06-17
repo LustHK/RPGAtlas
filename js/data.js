@@ -334,7 +334,7 @@
 
       for (const m of p.maps || []) {
         const n = m.width * m.height;
-        // v4 migration: convert old layers[] + gridFree format to RMMV data[]
+        // v4 migration: convert old layers[] format to RMMV data[]
         if (m.layers && !m.data) {
           const oldLayers = m.layers;
           const dataLen = n * 4;
@@ -413,32 +413,6 @@
         p.meta.builtinsSeeded = true;
       }
       return p;
-    },
-    // Convert a legacy grid-based map (map.layers[]) to grid-free (map.tilePlacements[]).
-    // Returns true if conversion happened, false if already grid-free or no map given.
-    migrateToGridFree(map) {
-      if (!map || map.gridFree || !map.layers) return false;
-      const n = map.width * map.height;
-      const placeholders = { ground: [], decor: [], decor2: [], over: [] };
-      for (const ln of ["ground", "decor", "decor2", "over"]) {
-        const arr = map.layers[ln] || [];
-        for (let ty = 0; ty < map.height; ty++) {
-          for (let tx = 0; tx < map.width; tx++) {
-            const tileId = arr[ty * map.width + tx];
-            if (tileId && tileId > 0) {
-              placeholders[ln].push({
-                id: crypto.randomUUID ? crypto.randomUUID() : "p_" + (ty * map.width + tx) + "_" + ln,
-                tileId: tileId,
-                x: tx * 48,
-                y: ty * 48,
-              });
-            }
-          }
-        }
-      }
-      map.tilePlacements = placeholders;
-      map.gridFree = true;
-      return true;
     },
   };
 

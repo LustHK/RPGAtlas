@@ -233,28 +233,25 @@ const Assets = (() => {
   var _projRef = null; // set by editor to reference the current project
   function setRmmvProjectRef(p) { _projRef = p; }
   function getRmmvTileFlags(tileId) {
-    if (tileId < 2048 || !_projRef || !_projRef.tilesets) return null;
-    // Find the tileset that contains this tile ID
+    if (tileId < 0 || tileId >= 8192 || !_projRef || !_projRef.tilesets) return null;
     var tsArr = _projRef.tilesets;
     for (var tsi = 1; tsi < tsArr.length; tsi++) {
       var ts = tsArr[tsi];
       if (!ts || !ts.flags) continue;
-      var idx = tileId - 2048;
-      if (idx >= 0 && idx < ts.flags.length) {
-        return ts.flags[idx];
+      if (tileId < ts.flags.length) {
+        return ts.flags[tileId];
       }
     }
     return null;
   }
   function setRmmvTileFlags(tileId, value) {
-    if (tileId < 2048 || !_projRef || !_projRef.tilesets) return;
+    if (tileId < 0 || tileId >= 8192 || !_projRef || !_projRef.tilesets) return;
     var tsArr = _projRef.tilesets;
     for (var tsi = 1; tsi < tsArr.length; tsi++) {
       var ts = tsArr[tsi];
       if (!ts || !ts.flags) continue;
-      var idx = tileId - 2048;
-      if (idx >= 0 && idx < ts.flags.length) {
-        ts.flags[idx] = value;
+      if (tileId < ts.flags.length) {
+        ts.flags[tileId] = value;
         return;
       }
     }
@@ -902,31 +899,102 @@ const Assets = (() => {
 
   // RMMV tilesheet cache: slotName → HTMLImageElement
   const rmmvSheets = {};
-  const rmmvSheetLoaders = {};
-  function loadRmmvSheet(slotName) {
-    if (rmmvSheets[slotName]) return rmmvSheets[slotName];
-    if (rmmvSheetLoaders[slotName]) return null;
-    rmmvSheetLoaders[slotName] = true;
-    const name = slotName === "A1" ? "TileA1" :
+  const rmmvFileCache = new Map();
+  const rmmvLoadingPromises = {};
+  function loadRmmvSheet(slotName, tilesetId) {
+    let name = slotName === "A1" ? "TileA1" :
       slotName === "A2" ? "TileA2" :
       slotName === "A3" ? "TileA3" :
       slotName === "A4" ? "TileA4" :
       slotName === "A5" ? "TileA5" :
       "Tile" + slotName;
-    var img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = function() {
-      rmmvSheets[slotName] = img;
-      // Invalidate tile cache so re-render picks up the image
-      for (var key in tileCache) { delete tileCache[key]; }
-      if (typeof renderMap === "function") renderMap();
-    };
-    img.onerror = function() { console.warn("Could not load tilesheet: " + img.src); };
-    img.src = "img/tilesets/" + name + ".png";
-    return null;
+      
+    if (tilesetId != null && typeof window.Data_Tilesets !== "undefined") {
+        const tsData = window.Data_Tilesets[tilesetId];
+        if (tsData && tsData.tilesetNames) {
+            const slotIdx = ["A1","A2","A3","A4","A5","B","C","D","E"].indexOf(slotName);
+            if (slotIdx >= 0 && tsData.tilesetNames[slotIdx]) {
+                name = tsData.tilesetNames[slotIdx];
+            }
+        }
+    } else if (typeof tilesetId === "string" && tilesetId.length > 0) {
+        // Editor mode: use the filename directly (e.g. "Dungeon_TileA1")
+        name = tilesetId;
+    }
+    const cacheKey = slotName + ":" + name;
+    if (rmmvLoadingPromises[cacheKey]) return rmmvLoadingPromises[cacheKey];
+    const promise = loadRmmvSheetByFilename(slotName, name);
+    rmmvLoadingPromises[cacheKey] = promise;
+    promise.finally(() => { delete rmmvLoadingPromises[cacheKey]; });
+    return promise;
   }
-  function getRmmvSheet(slotName) {
-    return rmmvSheets[slotName] || null;
+
+  function loadRmmvSheetByFilename(slotName, filename) {
+    if (!filename) return Promise.resolve(null);
+    
+    // Se o nome já começa com o prefixo, não adicionar de novo
+    const prefixes = ["Dungeon_", "Inside_", "Outside_", "World_", "SF_Inside_", "SF_Outside_"];
+    const possiblePaths = ["img/tilesets/" + filename + ".png"];
+    
+    if (!prefixes.some(p => filename.startsWith(p))) {
+        possiblePaths.push(
+            "img/tilesets/Dungeon_" + filename + ".png",
+            "img/tilesets/Inside_" + filename + ".png",
+            "img/tilesets/Outside_" + filename + ".png",
+            "img/tilesets/World_" + filename + ".png",
+            "img/tilesets/SF_Inside_" + filename + ".png",
+            "img/tilesets/SF_Outside_" + filename + ".png"
+        );
+    }
+    
+    const cacheKey = slotName + ":" + filename;
+    if (rmmvFileCache.has(cacheKey)) return Promise.resolve(rmmvFileCache.get(cacheKey));
+    
+    return tryLoadTileset(cacheKey, slotName, possiblePaths, 0);
+  }
+
+  function tryLoadTileset(cacheKey, slotName, paths, idx) {
+    if (idx >= paths.length) {
+        console.warn("Could not load tilesheet: " + paths[0]);
+        return Promise.resolve(null);
+    }
+    
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        rmmvSheets[slotName] = img;
+        rmmvFileCache.set(cacheKey, img);
+        for (let key in tileCache) { delete tileCache[key]; }
+        if (typeof renderMap === "function") renderMap();
+        resolve(img);
+      };
+      img.onerror = () => {
+        resolve(tryLoadTileset(cacheKey, slotName, paths, idx + 1));
+      };
+      img.src = paths[idx];
+    });
+  }
+
+  function getRmmvSheet(slotName, tilesetIdOrFilename) {
+    if (typeof tilesetIdOrFilename === "string" && tilesetIdOrFilename.length > 0) {
+      const cacheKey = slotName + ":" + tilesetIdOrFilename;
+      if (rmmvFileCache.has(cacheKey)) return rmmvFileCache.get(cacheKey);
+    }
+    if (rmmvSheets[slotName]) return rmmvSheets[slotName];
+    // Check if the legacy MZ tileset system already loaded this slot's sheet
+    const key = slotName === "A1" ? "TileA1" :
+      slotName === "A2" ? "TileA2" :
+      slotName === "A3" ? "TileA3" :
+      slotName === "A4" ? "TileA4" :
+      slotName === "A5" ? "TileA5" :
+      "Tile" + slotName;
+    const reg = tilesets[key];
+    if (reg && reg.image) {
+      rmmvSheets[slotName] = reg.image;
+      return reg.image;
+    }
+    return null;
   }
   // pre-render each tile once (seed fixed per id) for palette + fast map blits
   const tileCache = [];
@@ -935,9 +1003,9 @@ const Assets = (() => {
       if (id >= 2048) {
         const d = (typeof decodeTileId === "function") ? decodeTileId(id) : null;
         if (!d) { tileCache[id] = mkCanvas(TILE, TILE); return tileCache[id]; }
-        loadRmmvSheet(d.slotName);
+        loadRmmvSheet(d.slotName, null);
         const c = mkCanvas(TILE, TILE), g = c.getContext("2d");
-        const img = getRmmvSheet(d.slotName);
+        const img = getRmmvSheet(d.slotName, null);
         if (img) {
           const col = d.subPos % 8, row = Math.floor(d.subPos / 8);
           g.imageSmoothingEnabled = false;
@@ -953,14 +1021,14 @@ const Assets = (() => {
     }
     return tileCache[id];
   }
-  function drawTile(ctx, id, dx, dy) {
+  function drawTile(ctx, id, dx, dy, tilesetId) {
     if (id <= 0) return;
     if (id >= 2048) {
       if (typeof decodeTileId !== "function") return;
       const d = decodeTileId(id);
       if (!d) return;
-      const img = getRmmvSheet(d.slotName);
-      if (!img) { loadRmmvSheet(d.slotName); return; }
+      const img = getRmmvSheet(d.slotName, tilesetId);
+      if (!img) { loadRmmvSheet(d.slotName, tilesetId); return; }
       const col = d.subPos % 8, row = Math.floor(d.subPos / 8);
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(img, col * TILE, row * TILE, TILE, TILE, dx, dy, TILE, TILE);
@@ -1467,6 +1535,7 @@ const Assets = (() => {
 
   let preparedExternal = null;
   function bindExternalAssets(project) {
+    window.Data_Tilesets = project.tilesets;
     project.assets = project.assets || {};
     project.assets.tiles = project.assets.tiles || {};
     let nextTileId = Math.max(
@@ -1625,7 +1694,7 @@ const Assets = (() => {
     // Restore tile flags from project data
     if (project.tilesets) {
       for (const [tsKey, tsData] of Object.entries(project.tilesets)) {
-        if (tsData.tileFlags && tileFlags[tsKey]) {
+        if (tsData && tsData.tileFlags && tileFlags[tsKey]) {
           loadTileFlags(tsKey, tsData.tileFlags);
         }
       }
@@ -1729,6 +1798,10 @@ const Assets = (() => {
     tileFlags,
     getTileFlags, setTileFlags,
     loadTileFlags, exportTileFlags, syncTileFlagsToProject,
+    // RMMV bridge
+    MZ_TILESET_SPECS,
+    getRmmvTileFlags, setRmmvTileFlags, setRmmvProjectRef,
+        getRmmvSheet, loadRmmvSheet, loadRmmvSheetByFilename,
   };
 })();
 

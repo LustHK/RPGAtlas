@@ -354,24 +354,51 @@ input:focus, select:focus, textarea:focus { outline: 1px solid var(--gold-edge);
 .folder-picker-row { display: flex; gap: 6px; align-items: center; }
 .folder-picker-row input[type=text] { flex: 1; }
 
-/* ---------- tileset editor ---------- */
-.tse-viewer-wrap {
-  position: relative; overflow: auto; border: 1px solid #2c2f44;
-  border-radius: 6px; background: #101018; flex: 1; min-height: 360px; margin-top: 6px;
+/* ---------- tileset editor (RMMV style) ---------- */
+.rmmv-style { display: flex; flex-direction: column; gap: 8px; height: 100%; }
+
+/* Top: name + mode + image slots */
+.rmmv-top { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; background: #14151f; border-bottom: 1px solid #2a2d40; padding-bottom: 8px; }
+.rmmv-top .frow { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
+.rmmv-top .frow label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+.rmmv-top .frow input[type="text"] { width: 220px; }
+.rmmv-top .frow select { width: auto; min-width: 100px; }
+
+/* Image slots in a 3-column grid */
+.tileset-slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
+.slot-row { display: flex; align-items: center; gap: 4px; }
+.slot-label { width: 26px; font-size: 11px; flex-shrink: 0; color: #aeb2c8; }
+.slot-row input[type="text"] { flex: 1; min-width: 60px; }
+
+/* Middle: tabs + canvas + tools in a row */
+.rmmv-middle { display: flex; gap: 12px; flex: 1; min-height: 0; }
+.dbform-center { flex: 1; display: flex; flex-direction: column; }
+.dbform-tabs { display: flex; gap: 3px; margin-bottom: 4px; }
+.dbform-tabs button { font-size: 11px; padding: 3px 10px; }
+.dbform-side { flex: 0 0 170px; display: flex; flex-direction: column; gap: 6px; }
+.tse-viewer-wrap.rmmv-viewer { flex: 1; min-height: 380px; overflow: hidden; }
+
+/* Tools column */
+.tse-tools-vert { display: flex; flex-direction: column; gap: 2px; }
+.tse-tools-vert button {
+  text-align: left; padding: 5px 8px; font-size: 11px;
+  display: flex; align-items: center; gap: 6px;
+  border-left: 3px solid transparent; transition: border-color 0.15s, background 0.15s;
 }
-.tse-canvas { display: block; image-rendering: pixelated; cursor: crosshair; }
-.tse-toolbar {
-  display: flex; flex-wrap: wrap; gap: 3px; padding: 5px; margin-top: 6px;
-  background: #1a1c28; border: 1px solid #2c2f44; border-radius: 6px;
+.tse-tools-vert button .tool-icon { display: inline-block; width: 18px; text-align: center; font-size: 13px; flex: 0 0 auto; }
+.tse-tools-vert button .tool-label { flex: 1; white-space: nowrap; }
+.tse-tools-vert button.sel { background: var(--accent); border-color: var(--gold); color: #fff; }
+.tse-tools-vert button:hover { background: #2a2d40; }
+.tse-tools-vert button.sel:hover { background: var(--accent); }
+
+/* Bottom: note (full width) */
+.rmmv-bottom { flex: 0 0 auto; }
+.rmmv-bottom .note-area { display: flex; flex-direction: column; }
+.rmmv-bottom label { font-size: 11px; color: #aeb2c8; margin-bottom: 2px; }
+.rmmv-bottom textarea {
+  width: 100%; min-height: 60px; max-height: 120px;
+  font-size: 12px; font-family: Consolas, monospace; resize: vertical;
+  background: #1c1e2a; color: #e8eaf2;
+  border: 1px solid #3a3d52; border-radius: 3px; padding: 4px 6px;
 }
-.tse-toolbar button {
-  width: 32px; height: 32px; padding: 2px; font-size: 14px; font-weight: 700;
-  display: flex; align-items: center; justify-content: center;
-}
-.tse-toolbar button.sel { background: var(--accent); color: #fff; border-color: var(--accent-edge); }
-.tse-tabs { display: flex; gap: 3px; flex-wrap: wrap; margin: 6px 0; }
-.tse-tabs button { padding: 3px 8px; font-size: 11px; border-radius: 4px; }
-.tse-tabs button.sel { background: var(--accent); color: #fff; border-color: var(--accent-edge); }
-.tse-file-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; padding: 4px 8px; background: #1a1c28; border-radius: 4px; font-size: 12px; }
-.tse-zoom-bar { display: flex; gap: 4px; align-items: center; margin-top: 4px; flex-wrap: wrap; }
-.tse-zoom-bar label { font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 4px; }
+

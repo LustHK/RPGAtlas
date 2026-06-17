@@ -30,16 +30,7 @@ entry in `js/patch-notes.js`.
 - Small bug fixes, formatting-only edits, and internal maintenance do not require an entry unless
   they materially affect users.
 
-## Grid-Free Mapping — Reference
-
-The project has a multi-phase plan to replace the fixed 48×48 tile grid with a freeform
-pixel-position system. Key documents:
-
-- `wiki/Grid-Free-Mapping-Plan.md` — Complete implementation plan with 6 phases
-- `wiki/rpg-maker-mz-mapping-spec.md` — Official RPG Maker MZ tileset sheet specs
-- `wiki/Pixel-Movement-and-Grid-Free.md` — Original pixel movement and collision documentation
-
-### Tileset Sheet Dimensions (RPG Maker MZ)
+## Tileset Sheet Dimensions (RPG Maker MZ)
 
 | Sheet       | Resolution | Grid  | Kinds        | Autotile                  |
 | ----------- | ---------- | ----- | ------------ | ------------------------- |
@@ -56,4 +47,4 @@ pixel-position system. Key documents:
 - FLOOR_AUTOTILE_TABLE: 48 entries (A2, A4 wall-top)
 - WALL_AUTOTILE_TABLE: 16 entries (A4 wall-side)
 - Shape solver uses 8-neighbor bitmask for floor, 4-cardinal for wall
-- Grid-free adjacency: spatial overlap instead of array index
+- Adjacency: check grid indices (tx, ty) for neighbors.
