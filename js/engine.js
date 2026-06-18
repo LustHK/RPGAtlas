@@ -428,6 +428,7 @@ const _createInputSystem = window.createInputSystem;
       combat: null,
       light: parseLight(evData.name),
     };
+    if (pixelActive()) pixelInit(rt);
     refreshPage(rt);
     return rt;
   }
@@ -553,6 +554,16 @@ const _createInputSystem = window.createInputSystem;
     return dy > 0 ? 0 : 3;
   }
   const DIRD = { 0: [0, 1], 1: [-1, 0], 2: [1, 0], 3: [0, -1] };
+  // ---- pixel movement constants ----
+  const PX_DIAG = 1 / Math.SQRT2; // ~0.7071 — diagonal speed normalisation
+  const PX_DIR = [
+    [0, 1], [-PX_DIAG, PX_DIAG], [-1, 0], [-PX_DIAG, -PX_DIAG],
+    [0, -1], [PX_DIAG, -PX_DIAG], [1, 0], [PX_DIAG, PX_DIAG],
+  ];
+  const PX_CARD = [0, 2, 6, 4]; // cardinal→pixel-8-dir
+  function pixelActive() {
+    return proj && proj.system && proj.system.pixelMovement;
+  }
   const mapFloatTexts = [];
 
   function combatConfig(page) {
@@ -631,14 +642,23 @@ const _createInputSystem = window.createInputSystem;
     return Math.max(1, Math.floor(atk * 1.35 - def * 0.6));
   }
   function applyEnemyKnockback(rt, dir, tiles) {
-    if (!rt || rt.moving || tiles <= 0) return;
+    if (!rt || (rt.moving && !pixelActive()) || (rt.pixelMoving && pixelActive()) || tiles <= 0) return;
     const [dx, dy] = DIRD[dir] || [0, 0];
-    const nx = rt.x + dx;
-    const ny = rt.y + dy;
-    if (!canEntityPass(rt, nx, ny)) return;
-    rt.combat.knockback = true;
-    rt.combat.stagger = Math.max(rt.combat.stagger || 0, 14);
-    startMove(rt, dir);
+    if (pixelActive()) {
+      const nx = Math.round(rt.px) + dx;
+      const ny = Math.round(rt.py) + dy;
+      if (!tilePassable(nx, ny) || blockingEventAt(nx, ny)) return;
+      rt.combat.knockback = true;
+      rt.combat.stagger = Math.max(rt.combat.stagger || 0, 14);
+      pStartGridMove(rt, dir);
+    } else {
+      const nx = rt.x + dx;
+      const ny = rt.y + dy;
+      if (!canEntityPass(rt, nx, ny)) return;
+      rt.combat.knockback = true;
+      rt.combat.stagger = Math.max(rt.combat.stagger || 0, 14);
+      startMove(rt, dir);
+    }
   }
   function defeatMapEnemy(rt, cfg) {
     if (!combatReady(rt)) return;
@@ -798,6 +818,7 @@ const _createInputSystem = window.createInputSystem;
     return false;
   }
   function walkFrame(ent) {
+    if (pixelActive()) return pWalkFrame(ent);
     if (!ent.moving && ent.kind !== "object") return 1;
     const seq = [0, 1, 2, 1];
     const speed = ent.kind === "object" ? 24 : 8;
@@ -841,6 +862,196 @@ const _createInputSystem = window.createInputSystem;
     } else if (s === "wait60") {
       r.wait = 60;
     }
+  }
+
+  // ============================ pixel movement ============================
+  // Activated via Database > System > "Pixel Movement". When on, entities move
+  // in 8-dir with AABB collision, corner sliding, and pixel-level precision.
+  // Event routes transparently convert grid commands to pixel destinations.
+
+  function pixelInit(ent) {
+    ent.px = ent.x; ent.py = ent.y;
+    ent.pxTarget = null; ent.pyTarget = null;
+    ent.pixelMoving = false;
+  }
+
+  // AABB hitbox centered at entity's feet (tile units)
+  function pHb(ent) {
+    const hw = 0.30, hh = 0.22;
+    const px = ent.px ?? ent.rx, py = ent.py ?? ent.ry;
+    return { x: px - hw, y: py + 0.72 - hh, w: hw * 2, h: hh * 2 };
+  }
+
+  // True if any impassable tile overlaps the AABB
+  function pTilesBlock(hb) {
+    const x0 = Math.floor(hb.x), x1 = Math.floor(hb.x + hb.w - 0.0001);
+    const y0 = Math.floor(hb.y), y1 = Math.floor(hb.y + hb.h - 0.0001);
+    for (let ty = y0; ty <= y1; ty++)
+      for (let tx = x0; tx <= x1; tx++)
+        if (tx >= 0 && ty >= 0 && tx < map.width && ty < map.height && !tilePassable(tx, ty))
+          return true;
+    return false;
+  }
+
+  // Returns blocking entity if AABB overlaps one, else null
+  function pEntityBlock(ent, hb) {
+    for (const other of evRTs) {
+      if (other === ent || other.erased || !other.page) continue;
+      if (other.page.through) continue;
+      if (other.page.priority !== "same" && other.page.priority !== "above") continue;
+      if (rectsOverlap(hb, pHb(other))) return other;
+    }
+    if (G.player && G.player !== ent && rectsOverlap(hb, pHb(G.player)))
+      return G.player;
+    return null;
+  }
+
+  // Attempt (dx, dy) move with corner sliding. Returns { moved, blocker }
+  function pTryMove(ent, dx, dy) {
+    if (dx === 0 && dy === 0) return { moved: false, blocker: null };
+    const cur = pHb(ent);
+    const nx = (ent.px ?? ent.rx) + dx, ny = (ent.py ?? ent.ry) + dy;
+    const nxt = { x: nx - cur.w * 0.5, y: ny + 0.72 - cur.h * 0.5, w: cur.w, h: cur.h };
+
+    if (!pTilesBlock(nxt) && !pEntityBlock(ent, nxt)) {
+      ent.px = nx; ent.py = ny;
+      return { moved: true, blocker: null };
+    }
+    // slide X-only
+    const sx = { x: nxt.x, y: cur.y, w: cur.w, h: cur.h };
+    if (!pTilesBlock(sx) && !pEntityBlock(ent, sx)) {
+      ent.px = nx;
+      return { moved: true, blocker: null };
+    }
+    // slide Y-only
+    const sy = { x: cur.x, y: nxt.y, w: cur.w, h: cur.h };
+    if (!pTilesBlock(sy) && !pEntityBlock(ent, sy)) {
+      ent.py = ny;
+      return { moved: true, blocker: null };
+    }
+    const blocker = pEntityBlock(ent, nxt);
+    return { moved: false, blocker };
+  }
+
+  function pSyncTile(ent) {
+    ent.x = clamp(Math.round(ent.px), 0, map.width - 1);
+    ent.y = clamp(Math.round(ent.py), 0, map.height - 1);
+    ent.rx = ent.px; ent.ry = ent.py;
+  }
+
+  // ---- 8-direction input ---------------------------------------------------
+  function pInputDir8() {
+    const u = Input.pressed("up"), d = Input.pressed("down");
+    const l = Input.pressed("left"), r = Input.pressed("right");
+    if (!u && !d && !l && !r) return -1;
+    let dx = 0, dy = 0;
+    if (l) dx--; if (r) dx++;
+    if (u) dy--; if (d) dy++;
+    const map = { "0,1":0,"-1,1":1,"-1,0":2,"-1,-1":3,"0,-1":4,"1,-1":5,"1,0":6,"1,1":7 };
+    return map[dx+","+dy] ?? -1;
+  }
+  function pDirCardinal(dir8) { return [0,0,1,1,3,3,2,2][dir8] ?? 0; }
+
+  // ---- core pixel movement (all movement types) ----------------------------
+  // pMoveTarget advances the entity toward its current pxTarget/pyTarget.
+  // Returns true when the target is reached (pixelMoving set to false).
+  function pMoveTarget(ent, speed) {
+    const tx = ent.pxTarget, ty = ent.pyTarget;
+    if (tx == null || ty == null) { ent.pixelMoving = false; return true; }
+    const dx = tx - (ent.px ?? ent.rx), dy = ty - (ent.py ?? ent.ry);
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 0.005) {
+      ent.px = tx; ent.py = ty;
+      ent.pxTarget = null; ent.pyTarget = null; ent.pixelMoving = false;
+      pSyncTile(ent); return true;
+    }
+    const step = Math.min(speed, dist);
+    const result = pTryMove(ent, (dx / dist) * step, (dy / dist) * step);
+    pSyncTile(ent);
+    ent.animT = (ent.animT || 0) + 1;
+
+    if (!result.moved) {
+      // Completely blocked — release so entity can try a fresh direction next tick
+      ent.pxTarget = null; ent.pyTarget = null; ent.pixelMoving = false;
+      return true;
+    }
+
+    const rdx = ent.pxTarget - ent.px, rdy = ent.pyTarget - ent.py;
+    if (Math.sqrt(rdx*rdx+rdy*rdy) < 0.005 || (Math.sign(rdx) !== Math.sign(dx) && dx !== 0) || (Math.sign(rdy) !== Math.sign(dy) && dy !== 0)) {
+      ent.px = ent.pxTarget ?? ent.px; ent.py = ent.pyTarget ?? ent.py;
+      ent.pxTarget = null; ent.pyTarget = null; ent.pixelMoving = false;
+      pSyncTile(ent); return true;
+    }
+    return false;
+  }
+
+  // Start a pixel move approximately one tile in the given 8-direction.
+  // Used by player continuous input and NPC random movement.
+  function pStartDirMove(ent, dir8) {
+    ent.dir = pDirCardinal(dir8);
+    const [dx, dy] = PX_DIR[dir8];
+    ent.pxTarget = ent.px + dx;
+    ent.pyTarget = ent.py + dy;
+    ent.pixelMoving = true;
+    ent.animT = ent.animT || 0;
+  }
+
+  // Start a grid-direction pixel move toward adjacent tile centre (route cmds)
+  function pStartGridMove(ent, dir) {
+    ent.dir = dir;
+    const [dx, dy] = DIRD[dir];
+    ent.pxTarget = Math.round(ent.px) + dx;
+    ent.pyTarget = Math.round(ent.py) + dy;
+    ent.pixelMoving = true;
+    ent.animT = ent.animT || 0;
+  }
+
+  // ---- pixel-aware route processor -----------------------------------------
+  function pUpdateRoute(ent) {
+    const r = ent.route;
+    if (!r || ent.pixelMoving) return;
+    if (r.wait > 0) { r.wait--; return; }
+    if (r.idx >= r.steps.length) {
+      ent.route = null; ent.pixelMoving = false;
+      if (r.onDone) r.onDone();
+      return;
+    }
+    const s = r.steps[r.idx++];
+    const dirs = { up:3, down:0, left:1, right:2 };
+    if (s in dirs) {
+      const d = dirs[s]; ent.dir = d;
+      const [dx, dy] = DIRD[d];
+      const nx = Math.round(ent.px) + dx, ny = Math.round(ent.py) + dy;
+      if (tilePassable(nx, ny) && !blockingEventAt(nx, ny)) {
+        pStartGridMove(ent, d);
+        ent.animT = ent.animT || 0;
+      }
+    } else if (s === "forward") {
+      r.steps.splice(r.idx, 0, ["down","left","right","up"][ent.dir]);
+    } else if (s.startsWith("turn_")) {
+      ent.dir = dirs[s.slice(5)];
+    } else if (s === "wait15") { r.wait = 15;
+    } else if (s === "wait60") { r.wait = 60; }
+  }
+
+  // ---- NPC AI helpers ------------------------------------------------------
+  function pRandomDir() {
+    // 60% chance move, 40% face only
+    return rnd(10) < 6 ? rnd(8) : -2;
+  }
+  function pProximity(entA, entB, threshold) {
+    const ha = pHb(entA), hb = pHb(entB);
+    const ca = { x: ha.x + ha.w/2, y: ha.y + ha.h/2 };
+    const cb = { x: hb.x + hb.w/2, y: hb.y + hb.h/2 };
+    return Math.hypot(ca.x - cb.x, ca.y - cb.y) <= threshold;
+  }
+
+  // ---- walk frame by pixel distance ----------------------------------------
+  function pWalkFrame(ent) {
+    if (!ent.pixelMoving && ent.kind !== "object") return 1;
+    const seq = [0,1,2,1];
+    const sp = ent.kind === "object" ? 24 : 6;
+    return seq[Math.floor((ent.animT || 0) / sp) % 4];
   }
 
   // ============================ interpreter ============================
@@ -1385,77 +1596,118 @@ const _createInputSystem = window.createInputSystem;
     // player motion — advance the current step, then (if it finished this tick) start the
     // next one immediately, so there's no dead frame at each tile. activePlayerControl()
     // stays false during events/battles, so chaining can't spawn a spurious move.
-    if (p.moving) {
-      const arrived = updateEntityMotion(p, Input.pressed("dash") ? 0.13 : 0.085);
-      if (arrived) onPlayerStep();
-    }
-    if (!p.moving && p.route) {
-      updateRoute(p);
-    } else if (!p.moving && activePlayerControl()) {
-      const d = Input.dir();
-      if (Input.consume("attack")) {
-        startPlayerAttack();
-      } else if (d >= 0) {
-        p.dir = d;
-        const [dx, dy] = DIRD[d];
-        const nx = p.x + dx,
-          ny = p.y + dy;
-        const blocker = blockingEventAt(nx, ny);
-        if (
-          blocker &&
-          blocker.page.trigger === "touch" &&
-          blocker.page.commands.length
-        ) {
-          runEventBlocking(blocker);
-        } else if (tilePassable(nx, ny) && !blocker) {
-          startMove(p, d);
-          p.animT = p.animT || 0;
-        }
+    if (pixelActive()) {
+      // ---- pixel movement ----
+      if (p.pixelMoving) {
+        const speed = Input.pressed("dash") ? 0.13 : 0.085;
+        const prevX = p.x, prevY = p.y;
+        const arrived = pMoveTarget(p, speed);
+        // Fire step only when tile position actually changes
+        if (arrived && (p.x !== prevX || p.y !== prevY)) onPlayerStep();
       }
-      if (Input.consume("ok")) checkActionTrigger();
-      if (Input.consume("cancel")) openMenu();
+      if (!p.pixelMoving && p.route) {
+        pUpdateRoute(p);
+      }
+      if (activePlayerControl()) {
+        const d8 = pInputDir8();
+        if (Input.consume("attack")) {
+          startPlayerAttack();
+        } else if (d8 >= 0) {
+          // Re-target every tick — instant direction change mid-move
+          pStartDirMove(p, d8);
+        }
+        if (Input.consume("ok")) pCheckActionTrigger();
+        if (Input.consume("cancel")) openMenu();
+      }
+    } else {
+      // ---- grid movement ----
+      if (p.moving) {
+        const arrived = updateEntityMotion(p, Input.pressed("dash") ? 0.13 : 0.085);
+        if (arrived) onPlayerStep();
+      }
+      if (!p.moving && p.route) {
+        updateRoute(p);
+      } else if (!p.moving && activePlayerControl()) {
+        const d = Input.dir();
+        if (Input.consume("attack")) {
+          startPlayerAttack();
+        } else if (d >= 0) {
+          p.dir = d;
+          const [dx, dy] = DIRD[d];
+          const nx = p.x + dx, ny = p.y + dy;
+          const blocker = blockingEventAt(nx, ny);
+          if (blocker && blocker.page.trigger === "touch" && blocker.page.commands.length) {
+            runEventBlocking(blocker);
+          } else if (tilePassable(nx, ny) && !blocker) {
+            startMove(p, d);
+            p.animT = p.animT || 0;
+          }
+        }
+        if (Input.consume("ok")) checkActionTrigger();
+        if (Input.consume("cancel")) openMenu();
+      }
     }
-    if (p.moving) p.animT = (p.animT || 0) + 0; // animT advanced in motion fn
+    if (p.moving || p.pixelMoving) p.animT = (p.animT || 0) + 0; // animT advanced in motion fn
     updateMapCombat();
 
     // events
-    for (const rt of evRTs) {
-      if (rt.erased || !rt.page) continue;
-      // Same no-dead-frame pattern as the player above: a finished step chains into the next
-      // route/random step this same tick instead of pausing a frame at each tile.
-      if (rt.moving) {
-        const arrived = updateEntityMotion(rt, rt.combat && rt.combat.knockback ? 0.18 : rt.speed);
-        if (arrived && rt.combat) rt.combat.knockback = false;
-      }
-      if (!rt.moving && rt.route) {
-        updateRoute(rt);
-      } else if (!rt.moving && rt.page.moveType === "random" && !rt.locked && !blockingRun && !combatStaggered(rt)) {
-        if (--rt.moveT <= 0) {
-          rt.moveT = 40 + rnd(100);
-          const d = rnd(4);
-          if (rnd(4) === 0) rt.dir = d;
-          else if (canEntityPass(rt, rt.x + DIRD[d][0], rt.y + DIRD[d][1]))
-            startMove(rt, d);
+    if (pixelActive()) {
+      for (const rt of evRTs) {
+        if (rt.erased || !rt.page) continue;
+        if (rt.moving || rt.pixelMoving) {
+          const pSpeed = rt.combat && rt.combat.knockback ? 0.18 : rt.speed;
+          const arrived = pMoveTarget(rt, pSpeed);
+          if (arrived && rt.combat) rt.combat.knockback = false;
+        }
+        if (!rt.pixelMoving && rt.route) {
+          pUpdateRoute(rt);
+        } else if (!rt.pixelMoving && rt.page.moveType === "random" && !rt.locked && !blockingRun && !combatStaggered(rt)) {
+          if (--rt.moveT <= 0) {
+            rt.moveT = 40 + rnd(100);
+            const d8 = pRandomDir();
+            if (d8 === -2) { rt.dir = rnd(4); }
+            else if (d8 >= 0) pStartDirMove(rt, d8);
+          }
+        }
+        // autorun / parallel (shared with grid mode below)
+        if (!blockingRun && rt.page.trigger === "auto" && rt.page.commands.length)
+          runEventBlocking(rt);
+        if (rt.page.trigger === "parallel" && rt.page.commands.length && !parallels.get(rt)) {
+          parallels.set(rt, true);
+          new Interp(rt).runList(rt.page.commands).finally(async () => {
+            await sleep(50);
+            parallels.set(rt, false);
+          });
         }
       }
-      // autorun / parallel
-      if (
-        !blockingRun &&
-        rt.page.trigger === "auto" &&
-        rt.page.commands.length
-      ) {
-        runEventBlocking(rt);
-      }
-      if (
-        rt.page.trigger === "parallel" &&
-        rt.page.commands.length &&
-        !parallels.get(rt)
-      ) {
-        parallels.set(rt, true);
-        new Interp(rt).runList(rt.page.commands).finally(async () => {
-          await sleep(50);
-          parallels.set(rt, false);
-        });
+    } else {
+      for (const rt of evRTs) {
+        if (rt.erased || !rt.page) continue;
+        if (rt.moving) {
+          const arrived = updateEntityMotion(rt, rt.combat && rt.combat.knockback ? 0.18 : rt.speed);
+          if (arrived && rt.combat) rt.combat.knockback = false;
+        }
+        if (!rt.moving && rt.route) {
+          updateRoute(rt);
+        } else if (!rt.moving && rt.page.moveType === "random" && !rt.locked && !blockingRun && !combatStaggered(rt)) {
+          if (--rt.moveT <= 0) {
+            rt.moveT = 40 + rnd(100);
+            const d = rnd(4);
+            if (rnd(4) === 0) rt.dir = d;
+            else if (canEntityPass(rt, rt.x + DIRD[d][0], rt.y + DIRD[d][1]))
+              startMove(rt, d);
+          }
+        }
+        // autorun / parallel
+        if (!blockingRun && rt.page.trigger === "auto" && rt.page.commands.length)
+          runEventBlocking(rt);
+        if (rt.page.trigger === "parallel" && rt.page.commands.length && !parallels.get(rt)) {
+          parallels.set(rt, true);
+          new Interp(rt).runList(rt.page.commands).finally(async () => {
+            await sleep(50);
+            parallels.set(rt, false);
+          });
+        }
       }
     }
   }
@@ -1463,17 +1715,29 @@ const _createInputSystem = window.createInputSystem;
   function onPlayerStep() {
     G.steps++;
     const p = G.player;
-    // touch events on the tile we stepped onto
+    // touch events
     if (!blockingRun) {
-      const here = entityAt(p.x, p.y).find(
-        (rt) =>
-          rt.page.trigger === "touch" &&
-          rt.page.commands.length &&
-          (rt.page.priority !== "same" || rt.page.through),
-      );
-      if (here) {
-        runEventBlocking(here);
-        return;
+      if (pixelActive()) {
+        // In pixel mode, any touch-trigger event within 1 tile proximity fires
+        for (const rt of evRTs) {
+          if (rt.erased || !rt.page || rt.page.trigger !== "touch" || !rt.page.commands.length) continue;
+          if (rt.page.priority === "same" && !rt.page.through) continue;
+          if (pProximity(p, rt, 1.0)) {
+            runEventBlocking(rt);
+            return;
+          }
+        }
+      } else {
+        const here = entityAt(p.x, p.y).find(
+          (rt) =>
+            rt.page.trigger === "touch" &&
+            rt.page.commands.length &&
+            (rt.page.priority !== "same" || rt.page.through),
+        );
+        if (here) {
+          runEventBlocking(here);
+          return;
+        }
       }
     }
     // random encounters
@@ -1504,6 +1768,16 @@ const _createInputSystem = window.createInputSystem;
         (r) => r.page.trigger === "action" && r.page.commands.length,
       );
       if (rt) {
+        runEventBlocking(rt);
+        return;
+      }
+    }
+  }
+  function pCheckActionTrigger() {
+    const p = G.player;
+    for (const rt of evRTs) {
+      if (rt.erased || !rt.page || rt.page.trigger !== "action" || !rt.page.commands.length) continue;
+      if (pProximity(p, rt, 1.2)) {
         runEventBlocking(rt);
         return;
       }
@@ -3347,6 +3621,7 @@ const _createInputSystem = window.createInputSystem;
       moving: false, animT: 0, frame: 1, route: null, kind: "human",
       charsetIdx: 0, page: null, attack: null, hurtInvuln: 0,
     };
+    if (pixelActive()) pixelInit(G.player);
     refreshPlayerCharset();
   }
   function refreshPlayerCharset() {

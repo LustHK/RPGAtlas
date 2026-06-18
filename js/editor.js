@@ -3197,6 +3197,9 @@ const editorI18n = createEditorI18n({
           field("UI area height (0 = full)", nIn(s, "uiHeight", 0, 2160))));
         box.appendChild(h("div", { class: "dim" }, "The UI area centres message windows and menus inside the game screen — useful on very wide screens. Changes apply on the next playtest."));
 
+        box.appendChild(row(field("Pixel movement", chk(s, "pixelMovement"))));
+        box.appendChild(h("div", { class: "dim" }, "When on, characters move freely in 8 directions with pixel-accurate collision and corner sliding. Event move commands still work and automatically convert to pixel destinations. NPC AI also benefits from smoother diagonal movement."));
+
         box.appendChild(h("div", { class: "subhead" }, "Windows & fonts"));
         const fontOpts = RA.FONTS.slice();
         fontOpts.stringValues = true;

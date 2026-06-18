@@ -349,6 +349,7 @@ const RA = {
     if (!sys.fontMenu) sys.fontMenu = RA.FONTS[0].v;
     if (!sys.fontSize) sys.fontSize = 15;
     if (sys.windowOpacity == null) sys.windowOpacity = 93;
+    if (sys.pixelMovement == null) sys.pixelMovement = false;
     sys.sounds = Object.assign(RA.defaultSounds(), sys.sounds || {});
     sys.music = Object.assign(RA.defaultMusic(), sys.music || {});
     // v3 input bindings (keyboard + gamepad, remappable). Backfill per action so a partial
@@ -935,6 +936,7 @@ const DataDefaults = (() => {
         music: RA.defaultMusic(),
         types: RA.defaultTypes(),
         input: RA.defaultInput(),
+        pixelMovement: false,
       },
       actors: [
         { id: 1, name: "Ardan", classId: 1, level: 1, charset: "hero",    weaponId: 1, armorId: 1 },

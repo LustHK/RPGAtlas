@@ -4,6 +4,21 @@
 
 export const PATCH_NOTES = [
   {
+    date: "June 17, 2026",
+    title: "Pixel Movement — Free 8-Dir with AABB Collision",
+    summary: "Added a pixel movement mode (optional, per-project toggle in Database → System → Pixel Movement) that replaces grid-snapping with free 8-direction movement, hitbox-based collision, and corner sliding.",
+    items: [
+      "New toggle: Database → System → Pixel Movement enables 8-direction pixel movement for player, NPCs, and vehicles.",
+      "8-direction input: hold two directions at once (e.g. Up+Right) to walk diagonally; diagonal speed is normalised to prevent faster cornering.",
+      "AABB collision replaces tile-grid checks: each entity has a customisable feet-area hitbox that collides against impassable tiles and other entities.",
+      "Corner sliding: when an entity clips a tile corner by a few pixels, the system pushes it along the free axis so movement never hangs on a pixel.",
+      "Event move routes still work: grid commands like Move Down or Move Left transparently convert to pixel destinations, and the route waits for exact pixel arrival before proceeding.",
+      "NPC AI uses 8-direction random movement with time-based direction changes for more natural roaming.",
+      "Event triggers (Touch, Action) use Euclidean proximity instead of exact tile matching in pixel mode.",
+      "Walk animation frames advance based on real pixel distance travelled, eliminating the sliding-shoes effect.",
+    ],
+  },
+  {
     date: "June 16, 2026",
     title: "Quest Editor Validation Warnings",
     summary: "The Quests database tab now warns authors about broken quest references and other common setup mistakes while editing.",
